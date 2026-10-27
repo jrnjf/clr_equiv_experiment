@@ -1,0 +1,187 @@
+"""
+Two interchangeable backends.
+
+  tiny   -- CPU, synthetic data, seconds to run. Purpose: prove the code and the
+            two scheduling paths are correct. Never intended to produce a
+            scientific result.
+  cifar  -- CIFAR-10 + CIFAR-adapted ResNet-18 on GPU. The real experiment.
+
+Both expose the same interface:
+
+    build(cfg) -> (train_loader, val_loader, test_loader,
+                   make_model, eval_fn, steps_per_epoch)
+
+so experiments/run_equivalence.py is backend-agnostic.
+"""
+
+from __future__ import annotations
+
+import math
+import os
+
+
+# ---------------------------------------------------------------------------
+# tiny: synthetic, CPU, deterministic
+# ---------------------------------------------------------------------------
+def _build_tiny(cfg):
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
+
+    g = torch.Generator().manual_seed(cfg.get("data_seed", 0))
+
+    n_train = int(cfg.get("tiny_train", 2048))
+    n_val = int(cfg.get("tiny_val", 512))
+    n_test = int(cfg.get("tiny_test", 512))
+    dim = int(cfg.get("tiny_dim", 32))
+    n_classes = int(cfg.get("tiny_classes", 10))
+    bs = int(cfg["batch_size"])
+
+    # ONE fixed set of class centers shared by all splits. Generating fresh
+    # centers per split (the first version of this file) makes train and val
+    # different tasks, so validation accuracy sits at chance and the smoke test
+    # can never distinguish the arms.
+    centers = torch.randn(n_classes, dim, generator=g)
+
+    def make_split(n, seed):
+        gg = torch.Generator().manual_seed(seed)
+        y = torch.randint(0, n_classes, (n,), generator=gg)
+        x = centers[y] + 0.9 * torch.randn(n, dim, generator=gg)
+        return TensorDataset(x, y)
+
+    train_full = make_split(n_train, 1)
+    val_full = make_split(n_val, 2)
+    test_full = make_split(n_test, 3)
+
+    steps = len(train_full) // bs
+    if steps % 2:
+        raise SystemExit(
+            f"tiny backend: {len(train_full)} samples / batch {bs} = {steps} steps, "
+            f"which is ODD. The triangular half-cycle would be {steps/2}. "
+            f"Pick a batch size that divides to an even count "
+            f"(e.g. batch_size={len(train_full)//(steps-1) if steps>2 else bs})."
+        )
+
+    loader_kw = dict(num_workers=0, pin_memory=False)
+    train_loader = DataLoader(train_full, batch_size=bs, shuffle=True,
+                              drop_last=True, **loader_kw)
+    val_loader = DataLoader(val_full, batch_size=256, shuffle=False, **loader_kw)
+    test_loader = DataLoader(test_full, batch_size=256, shuffle=False, **loader_kw)
+
+    hidden = int(cfg.get("tiny_hidden", 64))
+
+    def make_model():
+        torch.manual_seed(cfg.get("init_seed", 0))
+        return nn.Sequential(
+            nn.Linear(dim, hidden), nn.ReLU(),
+            nn.Linear(hidden, hidden), nn.ReLU(),
+            nn.Linear(hidden, n_classes),
+        )
+
+    device = cfg.get("device", "cpu")
+
+    def eval_fn(model, _=None):
+        model.eval()
+        crit = nn.CrossEntropyLoss()
+        tot_loss, correct, n = 0.0, 0, 0
+        with torch.no_grad():
+            for x, y in val_loader:
+                x, y = x.to(device), y.to(device)
+                out = model(x)
+                tot_loss += crit(out, y).item() * x.size(0)
+                correct += (out.argmax(1) == y).sum().item()
+                n += x.size(0)
+        return tot_loss / n, correct / n
+
+    return (train_loader, val_loader, test_loader,
+            make_model, eval_fn, len(train_loader))
+
+
+# ---------------------------------------------------------------------------
+# cifar: CIFAR-10 + ResNet-18, GPU
+# ---------------------------------------------------------------------------
+def _build_cifar(cfg):
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, random_split
+    from torchvision import datasets, transforms
+    from torchvision.models import resnet18
+
+    mean, std = (0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)
+    train_tf = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+    eval_tf = transforms.Compose([transforms.ToTensor(),
+                                  transforms.Normalize(mean, std)])
+
+    root = cfg["data_root"]
+    train_aug = datasets.CIFAR10(root, train=True, download=True, transform=train_tf)
+    train_plain = datasets.CIFAR10(root, train=True, download=True, transform=eval_tf)
+    test_set = datasets.CIFAR10(root, train=False, download=True, transform=eval_tf)
+
+    n_val = int(cfg.get("n_val", 5000))
+    n_train = len(train_aug) - n_val
+    idx = torch.randperm(len(train_aug),
+                         generator=torch.Generator().manual_seed(0)).tolist()
+    tr_idx, va_idx = idx[:n_train], idx[n_train:]
+
+    from torch.utils.data import Subset
+    train_set = Subset(train_aug, tr_idx)
+    val_set = Subset(train_plain, va_idx)       # no augmentation for eval
+
+    bs = int(cfg["batch_size"])
+    train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
+                              num_workers=cfg.get("num_workers", 4),
+                              pin_memory=True, drop_last=True)
+    val_loader = DataLoader(val_set, batch_size=512, shuffle=False,
+                            num_workers=cfg.get("num_workers", 4), pin_memory=True)
+    test_loader = DataLoader(test_set, batch_size=512, shuffle=False,
+                             num_workers=cfg.get("num_workers", 4), pin_memory=True)
+
+    steps = len(train_loader)
+    if steps % 2:
+        raise SystemExit(
+            f"CIFAR backend: len(train_loader) = {steps} is ODD, so the triangular "
+            f"half-cycle is {steps/2} and no CyclicLR configuration reproduces it "
+            f"exactly (measured max|diff| ~1.5e-2). Use a batch size giving an even, "
+            f"exact step count: 45000/{250} = {45000//250}, 45000/300 = "
+            f"{45000//300}, 45000/225 = {45000//225}."
+        )
+
+    def make_model():
+        m = resnet18(num_classes=10)
+        # CIFAR stem: 3x3 stride-1 conv, no maxpool
+        m.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
+        m.maxpool = nn.Identity()
+        return m
+
+    device = cfg.get("device", "cuda")
+
+    def eval_fn(model, _=None):
+        model.eval()
+        crit = nn.CrossEntropyLoss()
+        tot_loss, correct, n = 0.0, 0, 0
+        with torch.no_grad():
+            for x, y in val_loader:
+                x, y = x.to(device), y.to(device)
+                out = model(x)
+                tot_loss += crit(out, y).item() * x.size(0)
+                correct += (out.argmax(1) == y).sum().item()
+                n += x.size(0)
+        return tot_loss / n, correct / n
+
+    return (train_loader, val_loader, test_loader,
+            make_model, eval_fn, len(train_loader))
+
+
+# ---------------------------------------------------------------------------
+def build(cfg):
+    name = cfg.get("backend", "tiny")
+    if name == "tiny":
+        return _build_tiny(cfg)
+    if name == "cifar":
+        return _build_cifar(cfg)
+    raise SystemExit(f"unknown backend: {name!r} (expected 'tiny' or 'cifar')")

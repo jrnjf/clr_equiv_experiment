@@ -1,0 +1,24 @@
+{
+  "backend": "tiny",
+  "batch_size": 128,
+  "epochs": 12,
+  "lr_max": 0.05,
+  "lr_SWR": 10.0,
+  "weight_decay": 0.0005,
+  "global_schedule": "cosine",
+  "end_ratio": 0.01,
+  "seeds": [
+    0,
+    1
+  ],
+  "device": "cpu",
+  "num_workers": 0,
+  "out_dir": "results",
+  "log_every": 1,
+  "tiny_train": 2048,
+  "tiny_val": 512,
+  "tiny_test": 512,
+  "tiny_dim": 32,
+  "tiny_hidden": 64,
+  "tiny_classes": 10
+}

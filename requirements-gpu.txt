@@ -1,0 +1,4 @@
+# GPU machine: use the CUDA index matching your driver, e.g.
+#   pip install -r requirements-gpu.txt --index-url https://download.pytorch.org/whl/cu124
+torch
+torchvision
