@@ -64,9 +64,18 @@ python3 -m venv .venv
 .venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 ```
 
-**No `activate` script is needed** (and on this machine one was not created:
-Debian ships venv activation scripts in a separate `python3.14-venv` package).
-All `make` targets call `.venv/bin/python` directly, which is equivalent.
+**No `activate` script is needed**: all `make` targets call `.venv/bin/python`
+directly, which is equivalent to activating.
+
+On this machine `python3 -m venv` did **not** create `activate` at all (Debian
+ships the activation scripts in a separate `python3.14-venv` package). If you
+want to `source .venv/bin/activate`, use the bootstrap script, which writes one:
+
+```bash
+./scripts/make_venv.sh cpu          # CPU-only torch
+./scripts/make_venv.sh cuda cu124   # GPU machine
+source .venv/bin/activate
+```
 
 ```bash
 # GPU machine (CIFAR backend)
