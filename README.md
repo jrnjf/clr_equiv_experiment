@@ -91,6 +91,49 @@ python3 experiments/run_equivalence.py --config configs/tiny.json
 python3 experiments/run_equivalence.py --config configs/cifar.json
 ```
 
+## Bugs this experiment already caught
+
+The equivalence check earned its keep before any GPU time was spent. Three real
+defects, all now fixed and guarded by tests:
+
+1. **Scheduler applied one step late (external path).** `optimizer.step()` ran
+   with the *previous* LR, so step 0 used `lr_max=0.8` instead of the triangular
+   minimum `0.08` — a 10x error on the first step. Measured effect: 7.6e-2
+   relative parameter difference. Fixed by the `prep() -> step() -> advance()`
+   ordering in `train_step()`.
+
+2. **Weight decay applied after the gradient update.** torch does
+   `w <- w*(1 - wd*lr) - lr*g`; the internal optimizer did `w <- w - lr*g` then
+   decayed, so decay acted on the *updated* weight. Algebraically equivalent,
+   numerically not: 3.2e-6 after one step, 2.1e-4 after 40. Fixed; residual is
+   now 1.19e-7 (float32 noise).
+
+3. **Tiny backend generated a fresh set of class centers per split**, so train
+   and validation were different tasks and val accuracy sat at chance (12%).
+   The smoke test could not discriminate anything. Fixed with one shared center
+   set.
+
+After the fixes, `--check-equivalence` reports a **2.1e-7** max parameter
+difference (4.2e-7 relative) and the full smoke run is reproducible per seed.
+
+## Expected smoke output (tiny backend, CPU)
+
+Using `configs/tiny.json` (`lr_max=0.05`, `lr_SWR=10`, 12 epochs, batch 128):
+
+| arm | val_acc (seed 0 and 1) |
+|---|---|
+| `A_internal` | 0.850 |
+| `B1_external_wd_eff` | 0.850 |
+| `B2_external_wd_base` | 0.854 |
+| `C_cosine_only` | 0.982 |
+
+The useful signal is the *pattern*, not the values: **A and B1 agree exactly**
+(two independent implementations of the same math), **B2 differs slightly** (the
+decay coupling is detectable), **C differs a lot** (the oscillating schedule
+changes dynamics on this task). That the smoke task can separate the arms is the
+only thing it is for — `C` winning here says nothing scientific, because on a
+separable 32-d toy the triangular wave's low mean LR is just a handicap.
+
 ## Interpreting the result
 
 * `--check-equivalence` prints `final-parameter max|A - B1|`. Threshold `1e-6`.
