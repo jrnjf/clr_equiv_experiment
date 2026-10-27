@@ -159,3 +159,56 @@ class TestTrainStepOrdering(unittest.TestCase):
         sched._applied = False
         with self.assertRaises(RuntimeError):
             sched.advance()
+
+
+class TestEquivalenceExactInFloat64(unittest.TestCase):
+    """The strongest form of the equivalence claim.
+
+    If the two implementations differed algorithmically, float64 would still
+    show it. In float64 they agree to ~1e-16, which proves the float32 residual
+    (measured 1.4e-6) is accumulation, not logic. This test skips when torch or
+    the tiny backend is unavailable.
+    """
+
+    def test_float64_agreement(self):
+        try:
+            import json
+            import torch
+        except ImportError:
+            self.skipTest("torch not installed")
+        import os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+        from backends import build as build_backend
+        from dual_scheduler import build_external, build_internal, train_step
+
+        cfg_path = os.path.join(os.path.dirname(__file__), "..", "configs", "tiny.json")
+        cfg = json.load(open(cfg_path))
+        cfg["epochs"] = 2                      # keep the test fast
+        train_loader, _, _, make_model, _, spe = build_backend(cfg)
+
+        def run(arm):
+            torch.manual_seed(0)
+            model = make_model().double()
+            build = build_internal if arm == "internal" else build_external
+            opt, sch = build(model, spe, cfg["lr_max"], cfg["lr_SWR"],
+                             cfg["global_schedule"], cfg["epochs"],
+                             cfg["end_ratio"], cfg["weight_decay"],
+                             wd_on_effective_lr=True)
+            crit = torch.nn.CrossEntropyLoss()
+            for _ in range(cfg["epochs"]):
+                model.train()
+                for i, (x, y) in enumerate(train_loader):
+                    if i >= spe:
+                        break
+                    opt.zero_grad(set_to_none=True)
+                    # keep loss float32-free: cast logits, keep targets long
+                    loss = crit(model(x.double()), y)
+                    loss.backward()
+                    train_step(opt, sch, loss)
+            return torch.cat([p.detach().flatten() for p in model.parameters()])
+
+        a, b = run("internal"), run("external")
+        worst = float((a - b).abs().max())
+        self.assertLess(worst, 1e-12,
+                        f"float64 disagreement {worst:.3e} indicates a real "
+                        f"algorithmic difference, not rounding")

@@ -191,12 +191,28 @@ def check_equivalence(cfg):
              for a, b in zip(finals["A_internal"], finals["B1_external_wd_eff"])]
     worst = max(diffs)
     scale = max(float(p.abs().max()) for p in finals["A_internal"])
+    relative = worst / max(scale, 1e-12)
+
     print(f"\nfinal-parameter max|A - B1| = {worst:.3e} "
-          f"(scale {scale:.3e}, relative {worst/max(scale,1e-12):.2e})")
-    if worst <= 1e-6:
-        print("EQUIVALENT: internal scheduler == external composition.")
+          f"(scale {scale:.3e}, relative {relative:.2e})")
+
+    # Tolerance is RELATIVE, not absolute. Rationale, measured on the tiny
+    # backend (12 epochs, 16 steps/epoch):
+    #   float32 -> 1.4e-6 absolute (6.3e-6 relative)
+    #   float64 -> 6.1e-16 (machine zero)
+    # so the two implementations are algebraically identical and the residual
+    # is pure float32 accumulation. An absolute 1e-6 threshold falsely failed
+    # at 1.416e-6; a genuine algorithmic bug shows up at ~1e-2 relative
+    # (the ordering bug measured 7.6e-2, the decay-ordering bug 4e-3), so a
+    # 1e-4 relative gate separates float noise from real disagreement by >1
+    # order of magnitude on each side.
+    TOL_REL = 1e-4
+    if relative <= TOL_REL:
+        print(f"EQUIVALENT within float32 tolerance (rel {relative:.2e} <= {TOL_REL:.0e}).")
+        print("  (float64 reruns give ~1e-16: the difference is rounding, not logic.)")
         return 0
-    print("NOT EQUIVALENT -- investigate before interpreting any other arm.")
+    print(f"NOT EQUIVALENT: relative {relative:.2e} > {TOL_REL:.0e}. "
+          f"Investigate before interpreting any other arm.")
     return 1
 
 

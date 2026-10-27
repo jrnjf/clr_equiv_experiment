@@ -62,6 +62,13 @@ against `group['lr']`, which is also the effective LR here, so `B1` matches. Arm
 # CPU-only (tiny backend, correctness)
 python3 -m venv .venv
 .venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+```
+
+**No `activate` script is needed** (and on this machine one was not created:
+Debian ships venv activation scripts in a separate `python3.14-venv` package).
+All `make` targets call `.venv/bin/python` directly, which is equivalent:
+
+```bash
 
 # GPU machine (CIFAR backend)
 python3 -m venv .venv
@@ -113,8 +120,13 @@ defects, all now fixed and guarded by tests:
    The smoke test could not discriminate anything. Fixed with one shared center
    set.
 
-After the fixes, `--check-equivalence` reports a **2.1e-7** max parameter
-difference (4.2e-7 relative) and the full smoke run is reproducible per seed.
+After the fixes, `--check-equivalence` reports a **relative** difference of
+~6e-6 on the 12-epoch tiny config. That is float32 accumulation, not logic —
+established by rerunning in float64, where the two paths agree to **6.1e-16**
+(and the same arm is bit-identical when run twice). Because of that, the pass
+gate is `relative <= 1e-4`, not an absolute threshold: the ordering bug measured
+7.6e-2 relative and the decay-ordering bug 4e-3, so real disagreement sits two
+orders of magnitude above float noise. `tests/` enforces the float64 result.
 
 ## Expected smoke output (tiny backend, CPU)
 
