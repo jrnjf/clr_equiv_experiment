@@ -96,8 +96,12 @@ def load_config(path):
 def steps_per_epoch_for(cfg):
     """Mirror the backend arithmetic without building the dataset."""
     bs = int(cfg["batch_size"])
-    if cfg["backend"] == "tiny":
+    be = cfg["backend"]
+    if be == "tiny":
         return int(cfg.get("tiny_train", 2048)) // bs
+    if be == "cifar_bench":
+        # full 50k train set minus optional held-out val
+        return (50000 - int(cfg.get("bench_val", 0))) // bs
     return (50000 - int(cfg.get("n_val", 5000))) // bs
 
 
@@ -125,19 +129,22 @@ def make_opt_builder(cfg, spe, arm):
 
 
 # ---------------------------------------------------------------------------
-def dry_run(cfg):
+def dry_run(cfg, allow_odd=False):
     spe = steps_per_epoch_for(cfg)
     print(f"backend={cfg['backend']} batch={cfg['batch_size']} "
           f"steps_per_epoch={spe} epochs={cfg['epochs']}")
     print(f"lr_max={cfg['lr_max']} lr_SWR={cfg['lr_SWR']} "
           f"global={cfg['global_schedule']} end_ratio={cfg['end_ratio']}")
     if spe % 2:
-        raise SystemExit(
-            f"steps_per_epoch={spe} is ODD, so the triangular half-cycle is "
-            f"{spe/2} and no CyclicLR configuration reproduces the internal wave "
-            f"exactly (measured max|diff| ~1.5e-2). Choose a batch size giving an "
-            f"even step count."
-        )
+        msg = (f"steps_per_epoch={spe} is ODD, so the triangular half-cycle is "
+               f"{spe/2} and no CyclicLR configuration reproduces the internal "
+               f"wave exactly (measured max|diff| ~1.5e-2).")
+        if not allow_odd:
+            raise SystemExit(msg + " Choose an even step count, or pass "
+                                   "--allow-odd when replicating an existing "
+                                   "protocol whose step count you cannot change.")
+        print(f"WARNING: {msg} Proceeding with --allow-odd; the realized peak "
+              f"will be ~{(1 - 1/(spe+1))*100:.1f}% below nominal.")
 
     worst = assert_same_lr_series(spe, cfg["lr_max"], cfg["lr_SWR"],
                                   n_steps=min(spe * cfg["epochs"], 3000),
@@ -223,12 +230,15 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--check-equivalence", action="store_true")
     ap.add_argument("--arms", nargs="*", default=list(ARMS))
+    ap.add_argument("--allow-odd", action="store_true",
+                    help="permit an odd steps_per_epoch (peak is then slightly "
+                         "undersampled); use when replicating a fixed protocol")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
 
     if args.dry_run:
-        return dry_run(cfg)
+        return dry_run(cfg, allow_odd=args.allow_odd)
     if args.check_equivalence:
         return check_equivalence(cfg)
 

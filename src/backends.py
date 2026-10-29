@@ -228,6 +228,7 @@ def _build_cifar_bench(cfg):
 
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
+    # drop_last=True exactly as in jrnjf/sgd_jumper (50000/128 -> 390 steps)
     train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
                               num_workers=nw, pin_memory=True, drop_last=True)
     val_loader = DataLoader(val_set, batch_size=512, shuffle=False,
