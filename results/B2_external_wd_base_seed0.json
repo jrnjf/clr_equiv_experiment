@@ -1,0 +1,15 @@
+{
+  "n_steps": 5400,
+  "first_loss": 2.4213550090789795,
+  "last_loss": 0.15783415734767914,
+  "min_loss": 0.04917849972844124,
+  "n_nonfinite": 0,
+  "status": "trained",
+  "arm": "B2_external_wd_base",
+  "seed": 0,
+  "epochs": 30,
+  "steps_per_epoch": 180,
+  "wall_seconds": 1146.7,
+  "final_val_acc": 0.8946,
+  "final_val_loss": 0.37790285658836364
+}

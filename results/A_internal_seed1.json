@@ -1,0 +1,15 @@
+{
+  "n_steps": 5400,
+  "first_loss": 2.331368923187256,
+  "last_loss": 0.05933397263288498,
+  "min_loss": 0.03878328576683998,
+  "n_nonfinite": 0,
+  "status": "trained",
+  "arm": "A_internal",
+  "seed": 1,
+  "epochs": 30,
+  "steps_per_epoch": 180,
+  "wall_seconds": 1146.0,
+  "final_val_acc": 0.9016,
+  "final_val_loss": 0.31111232209205625
+}

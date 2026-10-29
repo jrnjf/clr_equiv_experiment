@@ -64,7 +64,7 @@ DEFAULTS = {
     "backend": "tiny",
     "epochs": 3,
     "lr_max": 0.8,
-    "lr_SWR": 10.0,
+    "lr_SWR": 100.0,
     "weight_decay": 5e-4,
     "global_schedule": "cosine",
     "end_ratio": 0.01,
