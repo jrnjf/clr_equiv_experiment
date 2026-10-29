@@ -115,6 +115,7 @@ def run_arm(
     path = os.path.join(out_dir, f"{arm_name}_seed{seed}.csv")
     t0 = time.time()
     rows = []
+    val_hist = []          # per-epoch validation curve (for time-to-threshold)
     global_step = 0
 
     with open(path, "w", newline="") as fh:
@@ -171,11 +172,18 @@ def run_arm(
                 global_step += 1
 
             val_loss, val_acc = eval_fn(model, None)
+            val_hist.append({"epoch": epoch + 1, "val_loss": val_loss,
+                             "val_acc": val_acc, "wall": time.time() - t0})
             print(f"[{arm_name} seed{seed}] epoch {epoch+1}/{epochs} "
                   f"val_loss={val_loss:.4f} val_acc={val_acc:.4f} "
                   f"({time.time()-t0:.0f}s)")
 
     summary = summarise(rows)
+    summary["val_history"] = val_hist
+    summary["epoch_to_90"] = next((h["epoch"] for h in val_hist
+                                   if h["val_acc"] >= 0.90), None)
+    summary["wall_to_90"] = next((round(h["wall"], 1) for h in val_hist
+                                  if h["val_acc"] >= 0.90), None)
     summary.update({"arm": arm_name, "seed": seed, "epochs": epochs,
                     "steps_per_epoch": steps_per_epoch,
                     "wall_seconds": round(time.time() - t0, 1),
