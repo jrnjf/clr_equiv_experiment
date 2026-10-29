@@ -20,6 +20,17 @@ implementation.
 This is Smith's triangular cyclical LR policy (arXiv:1506.01186) in the
 dual-schedule composition the research code intends.
 
+### Data protocol
+
+Both CIFAR backends train on the **full 50,000** training images and evaluate on
+the **official 10,000-image test split**. There is no validation holdout carved
+from train: that discarded training data and changed `steps_per_epoch`, which
+changes the triangular period and therefore the schedule.
+
+`steps_per_epoch` is always `len(train_loader)` (i.e. `n_train // batch_size`
+with `drop_last=True`): **200** at batch 250, **390** at batch 128. Both even, so
+the triangular peak is sampled exactly.
+
 ## Arms
 
 | Arm | Optimizer | Schedule | Weight decay | Purpose |

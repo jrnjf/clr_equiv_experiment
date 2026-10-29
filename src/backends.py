@@ -100,14 +100,20 @@ def _build_tiny(cfg):
 # ---------------------------------------------------------------------------
 # cifar: CIFAR-10 + ResNet-18, GPU
 # ---------------------------------------------------------------------------
+# Trains on the FULL 50,000-image training set and evaluates on the official
+# 10,000-image TEST split. There is deliberately no validation holdout: carving
+# one out of train both discards training data and changes steps_per_epoch,
+# which in turn changes the triangular period (the schedule depends on it).
 def _build_cifar(cfg):
     import torch
     import torch.nn as nn
-    from torch.utils.data import DataLoader, random_split
+    from torch.utils.data import DataLoader
     from torchvision import datasets, transforms
     from torchvision.models import resnet18
 
-    mean, std = (0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)
+    mean = tuple(cfg.get("mean", (0.4914, 0.4822, 0.4465)))
+    std = tuple(cfg.get("std", (0.2470, 0.2435, 0.2616)))
+
     train_tf = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -118,42 +124,28 @@ def _build_cifar(cfg):
                                   transforms.Normalize(mean, std)])
 
     root = cfg["data_root"]
-    train_aug = datasets.CIFAR10(root, train=True, download=True, transform=train_tf)
-    train_plain = datasets.CIFAR10(root, train=True, download=True, transform=eval_tf)
+    train_set = datasets.CIFAR10(root, train=True, download=True, transform=train_tf)
     test_set = datasets.CIFAR10(root, train=False, download=True, transform=eval_tf)
 
-    n_val = int(cfg.get("n_val", 5000))
-    n_train = len(train_aug) - n_val
-    idx = torch.randperm(len(train_aug),
-                         generator=torch.Generator().manual_seed(0)).tolist()
-    tr_idx, va_idx = idx[:n_train], idx[n_train:]
-
-    from torch.utils.data import Subset
-    train_set = Subset(train_aug, tr_idx)
-    val_set = Subset(train_plain, va_idx)       # no augmentation for eval
-
     bs = int(cfg["batch_size"])
+    nw = cfg.get("num_workers", 4)
     train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
-                              num_workers=cfg.get("num_workers", 4),
-                              pin_memory=True, drop_last=True)
-    val_loader = DataLoader(val_set, batch_size=512, shuffle=False,
-                            num_workers=cfg.get("num_workers", 4), pin_memory=True)
-    test_loader = DataLoader(test_set, batch_size=512, shuffle=False,
-                             num_workers=cfg.get("num_workers", 4), pin_memory=True)
+                              num_workers=nw, pin_memory=True, drop_last=True)
+    # test set doubles as the evaluation set
+    eval_loader = DataLoader(test_set, batch_size=512, shuffle=False,
+                             num_workers=nw, pin_memory=True)
 
-    steps = len(train_loader)
+    steps = len(train_loader)          # e.g. 50000/250 = 200
     if steps % 2:
         raise SystemExit(
-            f"CIFAR backend: len(train_loader) = {steps} is ODD, so the triangular "
-            f"half-cycle is {steps/2} and no CyclicLR configuration reproduces it "
-            f"exactly (measured max|diff| ~1.5e-2). Use a batch size giving an even, "
-            f"exact step count: 45000/{250} = {45000//250}, 45000/300 = "
-            f"{45000//300}, 45000/225 = {45000//225}."
+            f"cifar: len(train_loader) = {steps} is ODD, so the triangular "
+            f"half-cycle is {steps/2} and no CyclicLR configuration reproduces "
+            f"the internal wave exactly. With 50000 train images, use a batch "
+            f"size giving an even step count (250 -> 200, 200 -> 250, 100 -> 500)."
         )
 
     def make_model():
         m = resnet18(num_classes=10)
-        # CIFAR stem: 3x3 stride-1 conv, no maxpool
         m.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
         m.maxpool = nn.Identity()
         return m
@@ -165,7 +157,7 @@ def _build_cifar(cfg):
         crit = nn.CrossEntropyLoss()
         tot_loss, correct, n = 0.0, 0, 0
         with torch.no_grad():
-            for x, y in val_loader:
+            for x, y in eval_loader:
                 x, y = x.to(device), y.to(device)
                 out = model(x)
                 tot_loss += crit(out, y).item() * x.size(0)
@@ -173,10 +165,8 @@ def _build_cifar(cfg):
                 n += x.size(0)
         return tot_loss / n, correct / n
 
-    return (train_loader, val_loader, test_loader,
-            make_model, eval_fn, len(train_loader))
-
-
+    return (train_loader, eval_loader, eval_loader, make_model, eval_fn,
+            len(train_loader))
 
 
 # ---------------------------------------------------------------------------
@@ -187,12 +177,13 @@ def _build_cifar(cfg):
 #     (so the triangular period is 390 steps, not 180)
 #   * evaluation on the full 10,000-image TEST split (no val holdout)
 #   * per-channel std (0.2023, 0.1994, 0.2010) rather than (0.247, 0.243, 0.262)
-# Use this backend when the goal is to reproduce or explain their numbers;
-# use `cifar` for a clean protocol with a held-out validation split.
+# Use this backend when the goal is to reproduce or explain their numbers.
+# It differs from `cifar` now only in the normalization constants and batch
+# size; both train on the full 50k and evaluate on the 10k test split.
 def _build_cifar_bench(cfg):
     import torch
     import torch.nn as nn
-    from torch.utils.data import DataLoader, Subset
+    from torch.utils.data import DataLoader
     from torchvision import datasets, transforms
     from torchvision.models import resnet18
 
@@ -212,26 +203,12 @@ def _build_cifar_bench(cfg):
     train_set = datasets.CIFAR10(root, train=True, download=True, transform=train_tf)
     test_set = datasets.CIFAR10(root, train=False, download=True, transform=eval_tf)
 
-    # optional small held-out val for time-to-threshold, carved from TRAIN so the
-    # test split stays untouched; default 0 keeps the benchmark protocol exact.
-    n_val = int(cfg.get("bench_val", 0))
-    if n_val:
-        idx = torch.randperm(len(train_set),
-                             generator=torch.Generator().manual_seed(0)).tolist()
-        tr_idx, va_idx = idx[n_val:], idx[:n_val]
-        train_plain = datasets.CIFAR10(root, train=True, download=True,
-                                       transform=eval_tf)
-        train_set = Subset(train_set, tr_idx)
-        val_set = Subset(train_plain, va_idx)
-    else:
-        val_set = test_set
-
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
     # drop_last=True exactly as in jrnjf/sgd_jumper (50000/128 -> 390 steps)
     train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
                               num_workers=nw, pin_memory=True, drop_last=True)
-    val_loader = DataLoader(val_set, batch_size=512, shuffle=False,
+    val_loader = DataLoader(test_set, batch_size=512, shuffle=False,
                             num_workers=nw, pin_memory=True)
 
     steps = len(train_loader)

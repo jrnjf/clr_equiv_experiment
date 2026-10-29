@@ -33,7 +33,8 @@ regime. **Any comparison with the 200-epoch benchmark must match `epochs`.**
 | | batch | data | steps/epoch | triangle period |
 |---|---|---|---|---|
 | benchmark | 128 | full 50k | **390** | 390 steps, peak at 195 |
-| E1 | 250 | 45k (5k held out) | **180** | 180 steps, peak at 90 |
+| E1 (as run) | 250 | 45k (5k held out) | **180** | 180 steps, peak at 90 |
+| E1 (current) | 250 | full 50k | **200** | 200 steps, peak at 100 |
 
 The triangle completes one cycle per epoch in both, but the cycle contains a
 different number of optimizer steps, so the *shape per step* differs. Both are
@@ -53,7 +54,9 @@ the loss, hence which LRs are stable. Different optimum, different curves.
 ## 4. Evaluation set
 
 * benchmark: full **10,000-image test** split, no validation holdout
-* E1: **5,000 held out of train** -> validation accuracy; test never reported
+* E1 (as run): **5,000 held out of train** -> validation accuracy; test never reported
+  (this has since been changed: the `cifar` backend now trains on all 50k and
+  evaluates on the 10k test split, giving 200 steps/epoch rather than 180)
 
 So the two sets of numbers are not even measured on the same data.
 

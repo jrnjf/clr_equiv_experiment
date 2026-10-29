@@ -7,11 +7,24 @@
   "weight_decay": 0.0005,
   "global_schedule": "cosine",
   "end_ratio": 0.01,
-  "seeds": [0, 1, 2],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
   "device": "cuda",
   "num_workers": 4,
-  "n_val": 5000,
   "data_root": "./data",
   "out_dir": "results",
-  "log_every": 1
+  "log_every": 1,
+  "mean": [
+    0.4914,
+    0.4822,
+    0.4465
+  ],
+  "std": [
+    0.247,
+    0.2435,
+    0.2616
+  ]
 }

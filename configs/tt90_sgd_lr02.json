@@ -15,7 +15,6 @@
   ],
   "device": "cuda",
   "num_workers": 4,
-  "n_val": 5000,
   "data_root": "./data",
   "out_dir": "results_tt90",
   "log_every": 10,

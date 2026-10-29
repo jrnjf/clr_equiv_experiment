@@ -20,6 +20,11 @@ and both paths share the same schedule object.
 
 ## 2. CIFAR-10 accuracy (validation, 5000 held out)
 
+> **Protocol note:** this run predates the change to train-on-all-50k /
+> evaluate-on-test. It held out 5,000 training images for validation, so
+> `steps_per_epoch` was 180, not 200. The schedule's period, and therefore the
+> LR trajectory, differs from later runs. Re-run before comparing with E2.
+
 | arm | seed 0 | seed 1 | seed 2 | mean | sd |
 |---|---|---|---|---|---|
 | A_internal | 0.9084 | 0.9016 | 0.9112 | 0.9071 | 0.0049 |
@@ -68,7 +73,8 @@ and accuracy as if they rank the arms identically.
 * **No constant-LR control.** Mean effective LR is 0.222 (RMS 0.245). Without a
   constant-LR arm matched on mean and on RMS, "oscillation vs cosine" is
   confounded with "which LR trajectory you happened to use".
-* **No test-set numbers.** All values above are the 5000-sample validation split.
+* **No test-set numbers.** All values above are the 5000-sample validation split
+  (old protocol; the current backend evaluates on the real 10k test set).
 * n=3: the equivalence and coupling results clear the significance bar; the
   schedule comparison does not.
 

@@ -93,18 +93,6 @@ def load_config(path):
     return cfg
 
 
-def steps_per_epoch_for(cfg):
-    """Mirror the backend arithmetic without building the dataset."""
-    bs = int(cfg["batch_size"])
-    be = cfg["backend"]
-    if be == "tiny":
-        return int(cfg.get("tiny_train", 2048)) // bs
-    if be == "cifar_bench":
-        # full 50k train set minus optional held-out val
-        return (50000 - int(cfg.get("bench_val", 0))) // bs
-    return (50000 - int(cfg.get("n_val", 5000))) // bs
-
-
 def make_opt_builder(cfg, spe, arm):
     common = dict(steps_per_epoch=spe, lr_max=cfg["lr_max"],
                   lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
@@ -130,7 +118,11 @@ def make_opt_builder(cfg, spe, arm):
 
 # ---------------------------------------------------------------------------
 def dry_run(cfg, allow_odd=False):
-    spe = steps_per_epoch_for(cfg)
+    # len(DataLoader(train, batch_size=bs, drop_last=True)) == n_train // bs.
+    # Computed here rather than by building the loader so --dry-run stays
+    # torch-free; main() always uses the real len(train_loader).
+    n_train = int(cfg.get("tiny_train", 2048)) if cfg["backend"] == "tiny" else 50000
+    spe = n_train // int(cfg["batch_size"])
     print(f"backend={cfg['backend']} batch={cfg['batch_size']} "
           f"steps_per_epoch={spe} epochs={cfg['epochs']}")
     print(f"lr_max={cfg['lr_max']} lr_SWR={cfg['lr_SWR']} "

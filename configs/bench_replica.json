@@ -9,11 +9,22 @@
   "weight_decay": 0.0005,
   "global_schedule": "cosine",
   "end_ratio": 0.01,
-  "seeds": [0],
+  "seeds": [
+    0
+  ],
   "device": "cuda",
   "num_workers": 4,
-  "bench_val": 0,
   "data_root": "./data",
   "out_dir": "results_bench",
-  "log_every": 10
+  "log_every": 10,
+  "mean": [
+    0.4914,
+    0.4822,
+    0.4465
+  ],
+  "std": [
+    0.2023,
+    0.1994,
+    0.201
+  ]
 }
