@@ -212,3 +212,27 @@ class TestEquivalenceExactInFloat64(unittest.TestCase):
         self.assertLess(worst, 1e-12,
                         f"float64 disagreement {worst:.3e} indicates a real "
                         f"algorithmic difference, not rounding")
+
+
+class TestLoggingReportsTrueLR(unittest.TestCase):
+    """The internal optimizer keeps group['lr'] at lr_max, so a log that reads
+    group['lr'] reports a constant 0.8 even though the schedule varies. This
+    regression test pins the correct accessor."""
+
+    def test_internal_effective_lr_varies(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch not installed")
+        from schedules import global_schedule
+        from sgd_dual import DualScheduledSGD
+        m = torch.nn.Linear(2, 1, bias=False)
+        opt = DualScheduledSGD(m.parameters(), steps_per_epoch=180, lr=0.8,
+                               lr_SWR=10.0,
+                               global_schedule=global_schedule("cosine", 30, 0.01))
+        vals = [opt.effective_lr(t) for t in range(5)]
+        self.assertAlmostEqual(vals[0], 0.08, places=6)
+        self.assertTrue(all(b > a for a, b in zip(vals, vals[1:])),
+                        "effective LR should rise through the first half-cycle")
+        self.assertEqual(opt.param_groups[0]["lr"], 0.8,
+                         "group['lr'] is intentionally static for the internal optimizer")

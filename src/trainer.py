@@ -133,6 +133,7 @@ def run_arm(
                 out = model(x)
                 loss = criterion(out, y)
                 loss.backward()
+                loss_value = float(loss.detach())
 
                 # measured BEFORE the update, so it reflects the step that is about
                 # to be taken (this is the quantity that diverges first)
@@ -140,7 +141,18 @@ def run_arm(
                     torch.sqrt(sum((p.grad.detach() ** 2).sum()
                                    for p in model.parameters() if p.grad is not None))
                 )
-                lr_now = float(opt.param_groups[0]["lr"])
+                # The LR actually used for THIS step. Reading group['lr'] is
+                # wrong for optimizers that carry the schedule internally
+                # (DualScheduledSGD never touches group['lr']; it holds lr_max
+                # forever), which made internal-arm logs read a constant 0.8.
+                if hasattr(opt, "effective_lr"):
+                    sc = opt.state.get(next(iter(opt.state)), {}).get("step_count", 0)                          if opt.state else 0
+                    lr_now = float(opt.effective_lr(sc))
+                elif sched is not None and getattr(sched, "last_lr", None) is not None \
+                        and getattr(sched, "_applied", False):
+                    lr_now = float(sched.last_lr)
+                else:
+                    lr_now = float(opt.param_groups[0]["lr"])
 
                 train_step(opt, sched, loss)   # ordering handled in one place
 
@@ -153,8 +165,8 @@ def run_arm(
 
                 if global_step % log_every == 0:
                     w.writerow([global_step, epoch, step_in_epoch, lr_now,
-                                float(loss), acc, grad_norm, wnorm, pmax])
-                    rows.append({"loss": float(loss), "acc": acc})
+                                loss_value, acc, grad_norm, wnorm, pmax])
+                    rows.append({"loss": loss_value, "acc": acc})
 
                 global_step += 1
 
