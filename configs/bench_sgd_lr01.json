@@ -1,0 +1,19 @@
+{
+  "_comment": "The benchmark's SGD baseline: lr=0.1, momentum=0.9, cosine T_max=200, same protocol. Reaching 90% at ~101 epochs is suspicious for this config; run this to check.",
+  "backend": "cifar_bench",
+  "batch_size": 128,
+  "epochs": 200,
+  "lr_max": 0.1,
+  "lr_SWR": 1.0,
+  "momentum": 0.9,
+  "weight_decay": 0.0005,
+  "global_schedule": "cosine",
+  "end_ratio": 0.01,
+  "seeds": [0],
+  "device": "cuda",
+  "num_workers": 4,
+  "bench_val": 0,
+  "data_root": "./data",
+  "out_dir": "results_bench",
+  "log_every": 10
+}

@@ -177,6 +177,93 @@ def _build_cifar(cfg):
             make_model, eval_fn, len(train_loader))
 
 
+
+
+# ---------------------------------------------------------------------------
+# cifar_bench: EXACT replica of the sgd_jumper benchmark protocol
+# ---------------------------------------------------------------------------
+# Differences from `cifar` above, all taken from jrnjf/sgd_jumper utils.py:
+#   * batch_size 128 on the FULL 50,000 training images  -> 390 steps/epoch
+#     (so the triangular period is 390 steps, not 180)
+#   * evaluation on the full 10,000-image TEST split (no val holdout)
+#   * per-channel std (0.2023, 0.1994, 0.2010) rather than (0.247, 0.243, 0.262)
+# Use this backend when the goal is to reproduce or explain their numbers;
+# use `cifar` for a clean protocol with a held-out validation split.
+def _build_cifar_bench(cfg):
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, Subset
+    from torchvision import datasets, transforms
+    from torchvision.models import resnet18
+
+    mean = tuple(cfg.get("bench_mean", (0.4914, 0.4822, 0.4465)))
+    std = tuple(cfg.get("bench_std", (0.2023, 0.1994, 0.2010)))
+
+    train_tf = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+    eval_tf = transforms.Compose([transforms.ToTensor(),
+                                  transforms.Normalize(mean, std)])
+
+    root = cfg["data_root"]
+    train_set = datasets.CIFAR10(root, train=True, download=True, transform=train_tf)
+    test_set = datasets.CIFAR10(root, train=False, download=True, transform=eval_tf)
+
+    # optional small held-out val for time-to-threshold, carved from TRAIN so the
+    # test split stays untouched; default 0 keeps the benchmark protocol exact.
+    n_val = int(cfg.get("bench_val", 0))
+    if n_val:
+        idx = torch.randperm(len(train_set),
+                             generator=torch.Generator().manual_seed(0)).tolist()
+        tr_idx, va_idx = idx[n_val:], idx[:n_val]
+        train_plain = datasets.CIFAR10(root, train=True, download=True,
+                                       transform=eval_tf)
+        train_set = Subset(train_set, tr_idx)
+        val_set = Subset(train_plain, va_idx)
+    else:
+        val_set = test_set
+
+    bs = int(cfg["batch_size"])
+    nw = cfg.get("num_workers", 4)
+    train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
+                              num_workers=nw, pin_memory=True, drop_last=True)
+    val_loader = DataLoader(val_set, batch_size=512, shuffle=False,
+                            num_workers=nw, pin_memory=True)
+
+    steps = len(train_loader)
+    if steps % 2:
+        raise SystemExit(f"cifar_bench: len(train_loader)={steps} is ODD; the "
+                         f"triangular half-cycle {steps/2} cannot be reproduced.")
+
+    def make_model():
+        m = resnet18(num_classes=10)
+        m.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
+        m.maxpool = nn.Identity()
+        nn.init.kaiming_normal_(m.conv1.weight, mode="fan_out", nonlinearity="relu")
+        return m
+
+    device = cfg.get("device", "cuda")
+
+    def eval_fn(model, _=None):
+        model.eval()
+        crit = nn.CrossEntropyLoss()
+        tot_loss, correct, n = 0.0, 0, 0
+        with torch.no_grad():
+            for x, y in val_loader:
+                x, y = x.to(device), y.to(device)
+                out = model(x)
+                tot_loss += crit(out, y).item() * x.size(0)
+                correct += (out.argmax(1) == y).sum().item()
+                n += x.size(0)
+        return tot_loss / n, correct / n
+
+    return (train_loader, val_loader, test_loader, make_model, eval_fn,
+            len(train_loader))
+
+
 # ---------------------------------------------------------------------------
 def build(cfg):
     name = cfg.get("backend", "tiny")
@@ -184,4 +271,7 @@ def build(cfg):
         return _build_tiny(cfg)
     if name == "cifar":
         return _build_cifar(cfg)
-    raise SystemExit(f"unknown backend: {name!r} (expected 'tiny' or 'cifar')")
+    if name == "cifar_bench":
+        return _build_cifar_bench(cfg)
+    raise SystemExit(f"unknown backend: {name!r} "
+                     f"(expected 'tiny', 'cifar' or 'cifar_bench')")

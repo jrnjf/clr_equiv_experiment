@@ -1,0 +1,19 @@
+{
+  "_comment": "Replicates jrnjf/sgd_jumper exactly: 200 epochs, batch 128 on the full 50k train set (390 steps/epoch), full 10k test eval, their normalization std, lr=0.8 momentum=0 triangular x cosine. Use this to reproduce Jumper's 15-epoch-to-90% curve with the jump removed.",
+  "backend": "cifar_bench",
+  "batch_size": 128,
+  "epochs": 200,
+  "lr_max": 0.8,
+  "lr_SWR": 10.0,
+  "momentum": 0.0,
+  "weight_decay": 0.0005,
+  "global_schedule": "cosine",
+  "end_ratio": 0.01,
+  "seeds": [0],
+  "device": "cuda",
+  "num_workers": 4,
+  "bench_val": 0,
+  "data_root": "./data",
+  "out_dir": "results_bench",
+  "log_every": 10
+}
