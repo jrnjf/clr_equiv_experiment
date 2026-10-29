@@ -87,6 +87,39 @@ Note `--allow-odd` is unnecessary for these configs: 50,000/128 = **390** steps,
 which is even. (The 351 I first computed came from mistakenly applying E1's
 5,000-sample holdout to the benchmark arithmetic.)
 
+
+## 6. Hardware: E1 ran on CPU, the benchmark on GPU
+
+This is the whole explanation for 41 s/epoch vs ~19 s/epoch — and it is not a
+protocol difference at all.
+
+| run | s/epoch | steps/epoch | **ms/step** | device | batch |
+|---|---|---|---|---|---|
+| E1 | 38.0 | 180 | **211** | CPU (`torch 2.14.1+cpu`) | 250 |
+| sgd_jumper benchmark | 19.6 | 390 | **50** | GPU (`cuda`) | 128 |
+
+Per-epoch time is misleading because the step counts differ. Normalised to
+**ms per optimizer step**, E1 is ~4.2x slower — and it does *fewer* steps per
+epoch, which is why 41s (E1) vs 19s (benchmark) understates the gap.
+
+Cause: this machine's venv has `torch 2.14.1+cpu` and `torch.cuda.is_available()
+== False`. The trainer's `device="cuda"` fell back to CPU with a warning that was
+easy to miss, and the run summary did not record the device.
+
+**Implication for planning** (12 runs x 30 epochs = 3.8 h on CPU):
+
+| protocol | CPU as-is | GPU (~5x) |
+|---|---|---|
+| 12 runs x 30 epochs | 3.8 h | 0.8 h |
+| 12 runs x 200 epochs | **25 h** | 5 h |
+| 1 arm x 200 epochs | 2.1 h | ~13 min |
+
+A 200-epoch E2 with matched baselines is infeasible on CPU and routine on the
+A40. **Do not run E2 on CPU.**
+
+Fixed: every run summary now records `device`, `sec_per_epoch` and
+`ms_per_step`, so a silent CPU fallback is visible afterwards.
+
 ## Principle
 
 `epochs` is not a budget knob in this experiment — it is a **hyperparameter of

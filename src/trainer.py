@@ -184,7 +184,11 @@ def run_arm(
                                    if h["val_acc"] >= 0.90), None)
     summary["wall_to_90"] = next((round(h["wall"], 1) for h in val_hist
                                   if h["val_acc"] >= 0.90), None)
-    summary.update({"arm": arm_name, "seed": seed, "epochs": epochs,
+    summary.update({"device": device,
+                    "sec_per_epoch": round((time.time() - t0) / max(epochs, 1), 2),
+                    "ms_per_step": round(
+                        (time.time() - t0) / max(global_step, 1) * 1000, 2),
+                    "arm": arm_name, "seed": seed, "epochs": epochs,
                     "steps_per_epoch": steps_per_epoch,
                     "wall_seconds": round(time.time() - t0, 1),
                     "final_val_acc": val_acc, "final_val_loss": val_loss})
