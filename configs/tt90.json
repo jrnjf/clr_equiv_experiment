@@ -1,0 +1,23 @@
+{
+  "_comment": "E2: time-to-90% with matched baselines. 200 epochs to match the sgd_jumper benchmark horizon (CosineAnnealingLR T_max=200). Primary metric is epoch_to_90, not final accuracy.",
+  "backend": "cifar",
+  "batch_size": 250,
+  "epochs": 200,
+  "lr_max": 0.8,
+  "lr_SWR": 10.0,
+  "weight_decay": 0.0005,
+  "global_schedule": "cosine",
+  "end_ratio": 0.01,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "device": "cuda",
+  "num_workers": 4,
+  "n_val": 5000,
+  "data_root": "./data",
+  "out_dir": "results_tt90",
+  "log_every": 10,
+  "momentum": 0.0
+}

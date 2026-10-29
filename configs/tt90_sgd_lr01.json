@@ -1,0 +1,23 @@
+{
+  "_comment": "Baseline reproducing the sgd_jumper benchmark exactly: SGD momentum=0.9, lr=0.1, cosine T_max=200. Uses the same global cosine as every other arm so only lr and the local triangle differ.",
+  "backend": "cifar",
+  "batch_size": 250,
+  "epochs": 200,
+  "lr_max": 0.1,
+  "lr_SWR": 1.0,
+  "weight_decay": 0.0005,
+  "global_schedule": "cosine",
+  "end_ratio": 0.01,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "device": "cuda",
+  "num_workers": 4,
+  "n_val": 5000,
+  "data_root": "./data",
+  "out_dir": "results_tt90",
+  "log_every": 10,
+  "momentum": 0.9
+}

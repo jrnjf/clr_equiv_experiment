@@ -94,7 +94,8 @@ class ExternalDualScheduler:
 
 def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    global_name: str, total_epochs: float, end_ratio: float,
-                   weight_decay: float, wd_on_effective_lr: bool = True):
+                   weight_decay: float, wd_on_effective_lr: bool = True,
+                   momentum: float = 0.0):
     from sgd_dual import DualScheduledSGD
     sched = global_schedule(global_name, total_epochs, end_ratio)
     opt = DualScheduledSGD(
@@ -104,7 +105,7 @@ def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
         lr_SWR=lr_SWR,
         global_schedule=sched,
         weight_decay=weight_decay,
-        momentum=0.0,
+        momentum=momentum,
         wd_on_effective_lr=wd_on_effective_lr,
     )
     return opt, None
@@ -112,7 +113,8 @@ def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
 
 def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    global_name: str, total_epochs: float, end_ratio: float,
-                   weight_decay: float, wd_on_effective_lr: bool = True):
+                   weight_decay: float, wd_on_effective_lr: bool = True,
+                   momentum: float = 0.0):
     """Stock SGD + external schedule.
 
     Weight-decay coupling is the subtle part: torch.optim.SGD applies decay
@@ -124,7 +126,7 @@ def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
     from torch.optim import SGD
     # start at lr_min: step 0 of the triangular wave is the minimum, and if a
     # caller forgets to prep() before the first step we want the benign value.
-    opt = SGD(model.parameters(), lr=lr_max / lr_SWR, momentum=0.0,
+    opt = SGD(model.parameters(), lr=lr_max / lr_SWR, momentum=momentum,
               weight_decay=weight_decay if wd_on_effective_lr else 0.0)
     sch = ExternalDualScheduler(opt, steps_per_epoch, lr_max, lr_SWR,
                                 global_name, total_epochs, end_ratio)

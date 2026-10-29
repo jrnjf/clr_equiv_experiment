@@ -105,7 +105,8 @@ def make_opt_builder(cfg, spe, arm):
     common = dict(steps_per_epoch=spe, lr_max=cfg["lr_max"],
                   lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
                   total_epochs=cfg["epochs"], end_ratio=cfg["end_ratio"],
-                  weight_decay=cfg["weight_decay"])
+                  weight_decay=cfg["weight_decay"],
+                  momentum=cfg.get("momentum", 0.0))
 
     def build(model):
         if arm == "A_internal":

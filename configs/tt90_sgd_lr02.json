@@ -1,0 +1,23 @@
+{
+  "_comment": "Well-tuned SGD+cosine baseline at lr=0.2 with the SAME 200-epoch cosine horizon, to test whether the benchmark's lr=0.1 SGD is simply undertuned.",
+  "backend": "cifar",
+  "batch_size": 250,
+  "epochs": 200,
+  "lr_max": 0.2,
+  "lr_SWR": 1.0,
+  "weight_decay": 0.0005,
+  "global_schedule": "cosine",
+  "end_ratio": 0.01,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "device": "cuda",
+  "num_workers": 4,
+  "n_val": 5000,
+  "data_root": "./data",
+  "out_dir": "results_tt90",
+  "log_every": 10,
+  "momentum": 0.9
+}
