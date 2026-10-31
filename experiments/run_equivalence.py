@@ -243,12 +243,20 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--check-equivalence", action="store_true")
     ap.add_argument("--arms", nargs="*", default=list(ARMS))
+    ap.add_argument("--out-dir", default=None,
+                    help="override cfg['out_dir'] (keeps runs separated)")
+    ap.add_argument("--seeds", nargs="*", type=int, default=None,
+                    help="override cfg['seeds'] (e.g. --seeds 0 for a pilot)")
     ap.add_argument("--allow-odd", action="store_true",
                     help="permit an odd steps_per_epoch (peak is then slightly "
                          "undersampled); use when replicating a fixed protocol")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
+    if args.out_dir:
+        cfg["out_dir"] = args.out_dir
+    if args.seeds is not None:
+        cfg["seeds"] = args.seeds
 
     if args.dry_run:
         return dry_run(cfg, allow_odd=args.allow_odd)
@@ -280,10 +288,24 @@ def main(argv=None):
                 out_dir=cfg["out_dir"], seed=seed))
 
     os.makedirs(cfg["out_dir"], exist_ok=True)
+    # MERGE with any existing summary rather than overwrite: runs are launched
+    # in several batches (different arms, different seeds), and clobbering the
+    # file would silently discard earlier results.
+    os.makedirs(cfg["out_dir"], exist_ok=True)
     out = os.path.join(cfg["out_dir"], f"e1_summary_{cfg['backend']}.json")
+    merged = {}
+    if os.path.exists(out):
+        try:
+            for r in json.load(open(out)):
+                merged[(r.get("arm"), r.get("seed"))] = r
+        except (json.JSONDecodeError, TypeError):
+            print(f"warning: {out} unreadable, starting a fresh summary")
+    for r in results:
+        merged[(r.get("arm"), r.get("seed"))] = r
     with open(out, "w") as fh:
-        json.dump(results, fh, indent=2)
-    print(f"\nwrote {out}")
+        json.dump(list(merged.values()), fh, indent=2)
+    print(f"\nwrote {out} ({len(merged)} runs total, "
+          f"{len(results)} from this invocation)")
     return 0
 
 
