@@ -345,3 +345,58 @@ class TestLoggingDoesNotAffectTraining(unittest.TestCase):
         self.assertEqual(out[1]["final_val_acc"], out[100000]["final_val_acc"])
         self.assertEqual([h["val_acc"] for h in out[1]["val_history"]],
                          [h["val_acc"] for h in out[100000]["val_history"]])
+
+
+class TestWeightDecayModes(unittest.TestCase):
+    """The three conventions must differ only in the DISTRIBUTION of decay,
+    not in mean strength.
+
+    NOTE: matching is over the WHOLE run. Epoch 0 sits at ~2x the run-average
+    effective LR (the cosine has not annealed yet), so any single early epoch
+    shows "effective" decaying harder. Compare over all 200 epochs.
+    """
+
+    def test_cumulative_decay_matched_over_full_run(self):
+        from schedules import (effective_lr_series, matched_weight_decays)
+
+        spe, epochs = 390, 200
+        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
+        m = matched_weight_decays(5e-4, spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
+
+        total = {
+            "effective": sum(m["effective"] * x for x in lr),
+            "base": sum(m["base"] * 0.8 for _ in lr),
+            "none": sum(m["none"] for _ in lr),
+        }
+        print("\n  cumulative per-step shrink over the full run:", total)
+        lo, hi = min(total.values()), max(total.values())
+        self.assertLess((hi - lo) / hi, 1e-6)
+
+        # and the weight trajectory must agree to well under 1%
+        w = {}
+        for k, lam in (("effective", None), ("base", m["base"] * 0.8),
+                       ("none", m["none"])):
+            ww = 1.0
+            for i, x in enumerate(lr):
+                step_lam = (m["effective"] * x) if k == "effective" else lam
+                ww *= (1.0 - step_lam)
+            w[k] = ww
+        print("  final weight after decay only:", {k: round(v, 5) for k, v in w.items()})
+        vals = list(w.values())
+        self.assertLess((max(vals) - min(vals)) / max(vals), 0.01)
+
+    def test_unmatched_would_differ_a_lot(self):
+        """At the SAME coefficient the conventions are NOT comparable."""
+        from schedules import effective_lr_series
+        spe, epochs = 390, 200
+        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
+        wd = 5e-4
+        tot = {
+            "effective": sum(wd * x for x in lr),
+            "base": sum(wd * 0.8 for _ in lr),
+            "none": sum(wd for _ in lr),
+        }
+        print("\n  same wd=5e-4, cumulative shrink:", {k: round(v, 1) for k, v in tot.items()})
+        # none is ~5x, base ~4x the effective convention
+        self.assertGreater(tot["none"] / tot["effective"], 4.0)
+        self.assertGreater(tot["base"] / tot["effective"], 3.0)

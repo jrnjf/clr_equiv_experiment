@@ -55,12 +55,17 @@ class ExternalDualScheduler:
         self.global_fn = global_schedule(global_name, total_epochs, end_ratio)
         self._step = 0
         self.last_lr = None
-        # Optional manual decoupled weight decay, applied with a CONSTANT lr.
-        # Needed because torch.optim.SGD can only decay against group['lr'],
-        # which the scheduler overwrites every step -- so "decay scaled by the
-        # base (nominal) lr" is not expressible through torch's API alone.
+        # Weight-decay mode. torch.optim.SGD can only decay against group['lr'],
+        # which the scheduler overwrites with the effective LR every step. The
+        # other two conventions therefore need the decay applied by hand:
+        #   "effective" : let torch do it  -> w *= (1 - wd * lr_effective)
+        #   "base"      : manual           -> w *= (1 - wd * lr_max)
+        #   "none"      : manual           -> w *= (1 - wd)
+        # "base" and "none" are constants, so their per-step shrink does NOT
+        # anneal while "effective" does. Compare them at matched mean strength.
+        self.wd_mode = "effective"
         self.manual_wd = 0.0
-        self.manual_wd_lr = 0.0
+        self.manual_wd_factor = 1.0
 
     def lr_at(self, step: int) -> float:
         c = step % self.steps_per_epoch
@@ -82,12 +87,12 @@ class ExternalDualScheduler:
         for group in self.opt.param_groups:
             group["lr"] = lr
         if self.manual_wd:
-            # w <- w*(1 - wd*lr_base) BEFORE the gradient update, matching
+            # w <- w*(1 - wd*factor) BEFORE the gradient update, matching
             # torch.optim.SGD's ordering: w <- w*(1 - wd*lr) - lr*g
             with __import__("torch").no_grad():
                 for group in self.opt.param_groups:
                     for p in group["params"]:
-                        p.data.mul_(1.0 - self.manual_wd * self.manual_wd_lr)
+                        p.data.mul_(1.0 - self.manual_wd * self.manual_wd_factor)
         self.last_lr = lr
         self._applied = True
         return lr
@@ -127,7 +132,7 @@ def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
 def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    global_name: str, total_epochs: float, end_ratio: float,
                    weight_decay: float, wd_on_effective_lr: bool = True,
-                   momentum: float = 0.0):
+                   momentum: float = 0.0, wd_mode: str | None = None):
     """Stock SGD + external schedule.
 
     Weight-decay coupling is the subtle part. torch.optim.SGD can only decay
@@ -153,13 +158,20 @@ def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
     #                             which is what DualScheduledSGD does when
     #                             wd_on_effective_lr=False (group['lr'] stays at
     #                             lr_max there).
+    # `wd_mode` supersedes the boolean; keep the boolean for old call sites.
+    if wd_mode is None:
+        wd_mode = "effective" if wd_on_effective_lr else "base"
+    if wd_mode not in ("effective", "base", "none"):
+        raise ValueError(f"unknown wd_mode {wd_mode!r}")
+    use_torch_wd = (wd_mode == "effective")
     opt = SGD(model.parameters(), lr=lr_max / lr_SWR, momentum=momentum,
-              weight_decay=weight_decay if wd_on_effective_lr else 0.0)
+              weight_decay=weight_decay if use_torch_wd else 0.0)
     sch = ExternalDualScheduler(opt, steps_per_epoch, lr_max, lr_SWR,
                                 global_name, total_epochs, end_ratio)
-    if not wd_on_effective_lr:
+    sch.wd_mode = wd_mode
+    if not use_torch_wd:
         sch.manual_wd = weight_decay
-        sch.manual_wd_lr = lr_max          # constant base LR
+        sch.manual_wd_factor = lr_max if wd_mode == "base" else 1.0
     return opt, sch
 
 

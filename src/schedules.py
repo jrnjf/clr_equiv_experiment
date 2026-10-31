@@ -87,3 +87,42 @@ def effective_lr_series(
         out.append(g(step / steps_per_epoch) * triangle_wave(c, steps_per_epoch,
                                                              lr_max, lr_min))
     return out
+
+
+def mean_effective_lr(steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                      epochs: int, global_name: str = "cosine",
+                      end_ratio: float = 1e-4) -> float:
+    """Time-averaged effective LR over a whole run."""
+    series = effective_lr_series(steps_per_epoch, lr_max, lr_SWR, epochs,
+                                 global_name, end_ratio)
+    return sum(series) / len(series)
+
+
+def matched_weight_decays(wd_effective: float, steps_per_epoch: int,
+                          lr_max: float, lr_SWR: float, epochs: int,
+                          global_name: str = "cosine",
+                          end_ratio: float = 1e-4) -> dict:
+    """Weight-decay coefficients giving EQUAL mean per-step shrink.
+
+    The three conventions shrink weights by different amounts at the same
+    coefficient, because they multiply by a different LR:
+
+        "effective" : wd * lr_eff(t)   <- oscillating, annealed
+        "base"      : wd * lr_max      <- constant
+        "none"      : wd * 1           <- constant
+
+    At lr_max=0.8, lr_SWR=1000, 200 epochs, the mean effective LR is ~0.200, so
+    equal coefficients would make "base" 4x and "none" 5x stronger than
+    "effective". This helper rescales so the MEAN shrink matches and only the
+    DISTRIBUTION over steps differs -- which is the mechanism under test.
+    """
+    mean_lr = mean_effective_lr(steps_per_epoch, lr_max, lr_SWR, epochs,
+                                global_name, end_ratio)
+    lam = wd_effective * mean_lr            # mean per-step shrink of "effective"
+    return {
+        "effective": wd_effective,
+        "base": lam / lr_max,
+        "none": lam,
+        "_mean_per_step_shrink": lam,
+        "_mean_effective_lr": mean_lr,
+    }

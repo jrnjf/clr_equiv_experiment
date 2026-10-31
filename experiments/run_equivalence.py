@@ -58,7 +58,8 @@ from dual_scheduler import (assert_same_lr_series, build_external,
                             build_internal, train_step)
 from schedules import effective_lr_series
 
-ARMS = ("A_internal", "B1_external_wd_eff", "B2_external_wd_base", "C_cosine_only")
+ARMS = ("A_internal", "B1_external_wd_eff", "B2_external_wd_base",
+        "F_external_wd_none", "C_cosine_only")
 
 DEFAULTS = {
     "backend": "tiny",
@@ -93,7 +94,23 @@ def load_config(path):
     return cfg
 
 
+def wd_for_arm(cfg, spe):
+    """Weight-decay coefficient per convention, matched on mean shrink.
+
+    `weight_decay` in the config is the coefficient for the *effective* (method)
+    convention. The "base" and "none" conventions are rescaled so their mean
+    per-step shrink matches, otherwise they would be 4x and 5x stronger and the
+    comparison would measure magnitude rather than distribution.
+    """
+    from schedules import matched_weight_decays
+    m = matched_weight_decays(cfg["weight_decay"], spe, cfg["lr_max"],
+                              cfg["lr_SWR"], cfg["epochs"],
+                              cfg["global_schedule"], cfg["end_ratio"])
+    return m
+
+
 def make_opt_builder(cfg, spe, arm):
+    m = wd_for_arm(cfg, spe)
     common = dict(steps_per_epoch=spe, lr_max=cfg["lr_max"],
                   lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
                   total_epochs=cfg["epochs"], end_ratio=cfg["end_ratio"],
@@ -106,7 +123,11 @@ def make_opt_builder(cfg, spe, arm):
         if arm == "B1_external_wd_eff":
             return build_external(model, wd_on_effective_lr=True, **common)
         if arm == "B2_external_wd_base":
-            return build_external(model, wd_on_effective_lr=False, **common)
+            c = dict(common); c["weight_decay"] = m["base"]
+            return build_external(model, wd_mode="base", **c)
+        if arm == "F_external_wd_none":
+            c = dict(common); c["weight_decay"] = m["none"]
+            return build_external(model, wd_mode="none", **c)
         if arm == "C_cosine_only":
             c = dict(common)
             c["lr_SWR"] = 1.0          # min == max -> no triangular component

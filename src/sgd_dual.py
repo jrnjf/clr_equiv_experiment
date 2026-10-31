@@ -72,6 +72,7 @@ class DualScheduledSGD(Optimizer):
         weight_decay: float = 0.0,
         momentum: float = 0.0,
         wd_on_effective_lr: bool = True,
+        wd_mode: str | None = None,
     ):
         if lr_SWR <= 0.0:
             raise ValueError(f"lr_SWR must be positive, got {lr_SWR}")
@@ -91,6 +92,11 @@ class DualScheduledSGD(Optimizer):
 
         self.global_schedule = global_schedule
         self.wd_on_effective_lr = wd_on_effective_lr
+        if wd_mode is None:
+            wd_mode = "effective" if wd_on_effective_lr else "base"
+        if wd_mode not in ("effective", "base", "none"):
+            raise ValueError(f"unknown wd_mode {wd_mode!r}")
+        self.wd_mode = wd_mode
         self._triangle = TriangleWave()
         self._steps_done = 0
 
@@ -161,7 +167,12 @@ class DualScheduledSGD(Optimizer):
                 # the already-updated weight; measured divergence 3.2e-6 after a
                 # single step, 2.1e-4 after 40.
                 if weight_decay != 0:
-                    wd_lr = lr_effective if self.wd_on_effective_lr else group["lr"]
+                    if self.wd_mode == "effective":
+                        wd_lr = lr_effective          # oscillating / annealed
+                    elif self.wd_mode == "base":
+                        wd_lr = group["lr"]           # constant lr_max
+                    else:                             # "none"
+                        wd_lr = 1.0                   # no LR scaling at all
                     p.data.mul_(1.0 - weight_decay * wd_lr)
 
                 p.data.add_(d_p, alpha=-lr_effective)
