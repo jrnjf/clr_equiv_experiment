@@ -1,3 +1,7 @@
+> **SUPERSEDED by [RESULTS_E1_200ep.md](RESULTS_E1_200ep.md).** This file
+> documents the 30-epoch / 5k-holdout / CPU run, which used a different
+> annealing horizon and is not comparable to the final results.
+
 # E1 results — implementation equivalence, and what the CIFAR run shows
 
 Run from the pulled repo: 3 seeds, CIFAR-10 / ResNet-18 / 30 epochs / batch 250
