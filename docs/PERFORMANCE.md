@@ -1,3 +1,26 @@
+> **CORRECTION (measured on GPU).** The hypothesis below — that per-step
+> synchronisation accounts for the ~2x gap — is **wrong**. Measured on a CUDA
+> box with `scripts/bench_logging.py`:
+>
+> | log_every | ms/step | s/epoch | vs none |
+> |---|---|---|---|
+> | 1 | 105.1 | 41.0 | 1.11x |
+> | 10 | 95.4 | 37.2 | 1.01x |
+> | 50 | 93.9 | 36.6 | 0.99x |
+> | none | 94.5 | 36.9 | 1.00x |
+>
+> Logging costs **11% at log_every=1 and ~1% at 10**. The gating fix is still
+> correct and worth keeping, but it explains ~4 s of a ~17 s/epoch gap.
+>
+> Critically, **with logging entirely disabled the loop still runs at
+> 94.5 ms/step (36.9 s/epoch)**, i.e. ~1.9x the benchmark's 19.6 s/epoch. That
+> residual is NOT logging and is not yet explained. Use
+> `scripts/profile_step.py` to locate it.
+>
+> Also unresolved: the benchmark's 19.6 s/epoch was measured on someone else's
+> hardware. Before assuming a code slowdown, re-run `jumper_expirement.py` on the
+> same machine — if it also lands near 36 s/epoch, this was never a code gap.
+
 # Why the trainer was ~2x slower than jumper_experiment
 
 E1: 43.8 s/epoch (112 ms/step). Benchmark: 19.6 s/epoch (50 ms/step).
