@@ -66,8 +66,24 @@ def main():
         batches.append((x, y))
         if len(batches) >= a.batches:
             break
+    print(f"torch {torch.__version__} | cuda {torch.version.cuda}")
+    if torch.cuda.is_available():
+        pr = torch.cuda.get_device_properties(0)
+        print(f"GPU: {torch.cuda.get_device_name(0)} ({pr.total_memory/1e9:.1f} GB, "
+              f"{pr.multi_processor_count} SMs)")
     print(f"device={device} batch={cfg['batch_size']} steps/epoch={spe} "
           f"measuring on {len(batches)} batches\n")
+
+    # ---- 0. DataLoader alone: only next(), no .to(), no compute.
+    # This is where waiting hides in the training loop: the `for ... in loader`
+    # fetch sits outside every per-operation timer in an instrumented trainer.
+    def loader_only():
+        n = 0
+        for _x, _y in train_loader:
+            n += 1
+            if n >= len(batches):
+                break
+    ms_loader = timeit(loader_only, 2) / len(batches)
 
     # ---- 1. data only: pull tensors to device, no compute
     def data_only():
@@ -118,7 +134,8 @@ def main():
     ms_eval = timeit(do_eval, 2)
 
     print(f"{'segment':<34}{'ms':>10}")
-    print(f"{'data only (device copy)':<34}{ms_data:>10.2f}")
+    print(f"{'DataLoader only (next())':<34}{ms_loader:>10.2f}")
+    print(f"{'device copy (.to)':<34}{ms_data:>10.2f}")
     print(f"{'forward':<34}{ms_fwd:>10.2f}")
     print(f"{'forward + backward':<34}{ms_fb:>10.2f}")
     print(f"{'  (backward alone)':<34}{ms_fb - ms_fwd:>10.2f}")
@@ -132,6 +149,17 @@ def main():
     print(f"  of which eval: {ms_eval / 1000:.1f} s")
     print(f"  of which steps: {(ms_full + ms_data) * spe / 1000:.1f} s")
 
+    # Reconciliation: sum of the measured segments vs a full epoch at that rate.
+    measured = (ms_loader + ms_full) * spe / 1000 + ms_eval / 1000
+    print(f"\nreconciliation: ({ms_loader:.1f} loader + {ms_full:.1f} step) x {spe} "
+          f"+ {ms_eval:.0f} eval = {measured:.1f} s/epoch")
+    print(f"  if the real epoch time is much larger, the gap is async submission "
+          f"(these numbers are device-synchronised, so it should not be).")
+
+    if ms_loader > 0.5 * ms_full:
+        print(f"\n>> DataLoader is the bottleneck: {ms_loader:.1f} ms/batch waited "
+              f"for workers. Try --num-workers 0/2/8 and set "
+              f"torch.backends.cudnn.benchmark=True.")
     if ms_data > 0.5 * (ms_fb + ms_data):
         print("\n>> data loading looks like a large share; check num_workers / "
               "CPU-side augmentation.")
