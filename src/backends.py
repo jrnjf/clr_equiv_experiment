@@ -129,11 +129,20 @@ def _build_cifar(cfg):
 
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
+    # persistent_workers=True: without it every `for ... in loader` spawns a
+    # fresh worker pool, and that startup is charged to EVERY epoch. Measured
+    # on the GPU box: DataLoader-only iteration cost 264 ms/batch over a 40-batch
+    # window, which is ~10 s of process startup, and epoch evaluation measured
+    # 10.7 s for 20 batches -- i.e. the eval "cost" was almost entirely worker
+    # spawn. Together those two accounted for ~20 s of a 36.7 s epoch.
+    pw = nw > 0
     train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
-                              num_workers=nw, pin_memory=True, drop_last=True)
+                              num_workers=nw, pin_memory=True, drop_last=True,
+                              persistent_workers=pw)
     # test set doubles as the evaluation set
-    eval_loader = DataLoader(test_set, batch_size=512, shuffle=False,
-                             num_workers=nw, pin_memory=True)
+    eval_loader = DataLoader(test_set, batch_size=1024, shuffle=False,
+                             num_workers=nw, pin_memory=True,
+                             persistent_workers=pw)
 
     steps = len(train_loader)          # e.g. 50000/250 = 200
     if steps % 2:
@@ -206,10 +215,13 @@ def _build_cifar_bench(cfg):
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
     # drop_last=True exactly as in jrnjf/sgd_jumper (50000/128 -> 390 steps)
+    pw = nw > 0
     train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
-                              num_workers=nw, pin_memory=True, drop_last=True)
-    val_loader = DataLoader(test_set, batch_size=512, shuffle=False,
-                            num_workers=nw, pin_memory=True)
+                              num_workers=nw, pin_memory=True, drop_last=True,
+                              persistent_workers=pw)
+    val_loader = DataLoader(test_set, batch_size=1024, shuffle=False,
+                            num_workers=nw, pin_memory=True,
+                            persistent_workers=pw)
 
     steps = len(train_loader)
     if steps % 2:

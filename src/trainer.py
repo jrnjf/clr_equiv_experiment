@@ -108,6 +108,12 @@ def run_arm(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+    # Fixed input shape (32x32 CIFAR) makes cuDNN autotuning worth it: it picks
+    # the fastest conv algorithms on the first few iterations. Off by default in
+    # torch, costs one short warmup, and does not change the math.
+    if str(device).startswith("cuda") and torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+
     model = make_model().to(device)
     opt, sched = make_optimizer_and_scheduler(model)
     criterion = torch.nn.CrossEntropyLoss()
