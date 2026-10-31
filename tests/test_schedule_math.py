@@ -236,3 +236,67 @@ class TestLoggingReportsTrueLR(unittest.TestCase):
                         "effective LR should rise through the first half-cycle")
         self.assertEqual(opt.param_groups[0]["lr"], 0.8,
                          "group['lr'] is intentionally static for the internal optimizer")
+
+
+class TestWeightDecayConventions(unittest.TestCase):
+    """Both weight-decay conventions must match between the internal optimizer
+    and the external composition.
+
+    Regression guard for a real bug: build_external used to pass
+    weight_decay=0.0 for wd_on_effective_lr=False and never add the manual term,
+    so that arm silently trained with no decay at all.
+    """
+
+    def test_both_conventions_match(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch not installed")
+        from dual_scheduler import build_external, build_internal, train_step
+
+        base = torch.randn(6)
+
+        def run(kind, wd_eff):
+            class M(torch.nn.Module):
+                def __init__(s):
+                    super().__init__()
+                    s.w = torch.nn.Parameter(base.clone())
+            m = M()
+            build = build_internal if kind == "internal" else build_external
+            opt, sch = build(m, 20, 0.8, 1000.0, "cosine", 3, 1e-4, 5e-4, wd_eff)
+            for _ in range(40):
+                m.w.grad = torch.full_like(m.w, 0.1)
+                train_step(opt, sch, None)
+            return m.w.detach().clone()
+
+        for flag in (True, False):
+            with self.subTest(wd_on_effective_lr=flag):
+                a, b = run("internal", flag), run("external", flag)
+                rel = float((a - b).abs().max()) / max(float(a.abs().max()), 1e-12)
+                self.assertLess(rel, 1e-4)
+
+    def test_base_lr_decay_is_stronger_than_no_decay(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch not installed")
+        from dual_scheduler import build_internal, train_step
+
+        base = torch.randn(6)
+
+        def run(wd, flag):
+            class M(torch.nn.Module):
+                def __init__(s):
+                    super().__init__()
+                    s.w = torch.nn.Parameter(base.clone())
+                def params(s):
+                    return [s.w]
+            m = M()
+            opt, sch = build_internal(m, 20, 0.8, 1000.0, "cosine", 3, 1e-4, wd, flag)
+            for _ in range(40):
+                m.w.grad = torch.full_like(m.w, 0.1)
+                train_step(opt, sch, None)
+            return float(m.w.detach().norm())
+
+        self.assertLess(run(5e-4, False), run(0.0, True),
+                        "decay against base LR should shrink weights more than no decay")

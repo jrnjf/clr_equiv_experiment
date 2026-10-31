@@ -93,13 +93,31 @@ constant-LR baseline at 0.2 might also reach 90% quickly.
 (RMS-matched), same 200 epochs / 390 steps / seed budget. Until then the
 time-to-90 result is consistent with your claim but does not establish it.
 
-## 5. B2: weight-decay coupling is confounded with decay strength
+## 5. B2 is mislabelled: it ran with NO weight decay at all
 
-B1 (decay against the effective LR, mean 0.20) beats B2 (decay against base LR
-0.8) by 2.08 pp, 3/3 seeds, t=31. But B2's decay is **2x stronger** on average
-because it multiplies the base LR. So this is "less decay is better here", not
-evidence that the coupling itself is good. To separate, rerun B2 with
-`weight_decay` halved so effective decay matches B1.
+**Correction to an earlier reading of this section.** B2 was intended to test
+"decay against the base LR instead of the effective LR". The wiring did not do
+that: `build_external` passed `weight_decay=0.0` to `torch.optim.SGD` when
+`wd_on_effective_lr=False`, and the manual decay term the docstring referred to
+was never implemented. So **B2 ran with zero weight decay.**
+
+Therefore the measured +2.08 pp (t=31, 3/3 seeds) does not compare two decay
+conventions. It compares:
+
+* B1: weight decay present, scaled by the effective (oscillating) LR, mean 0.20
+* B2: **no weight decay whatsoever**
+
+i.e. the result says *"this configuration needs weight decay"* (+2.08 pp), which
+is unsurprising, and says nothing yet about which LR should scale the decay.
+
+Fixed in `src/dual_scheduler.py`: B2 now applies decoupled decay manually against
+the constant base LR (`lr_max`), matching `DualScheduledSGD(wd_on_effective_lr=
+False)`. Verified equivalent to the internal optimizer (exactly 0.0 difference on
+a 60-step tiny run; 5e-7 relative for the effective-LR convention).
+
+Consequence: **the B2 numbers in this document must be re-run** before quoting
+them. After the fix, base-LR decay is ~4x stronger on average than effective-LR
+decay, so it is a genuinely different regimen and its accuracy is unknown.
 
 ## 6. Relation to the sgd_jumper benchmark
 
@@ -123,6 +141,7 @@ is a close replication, not an exact one.
 * **No period or amplitude sweep.** Period is fixed at one epoch.
 * **No baseline at a properly tuned LR.** Cosine-only at 0.8 and the benchmark's
   SGD at 0.1 are both off-optimum, for opposite reasons.
+* **No valid weight-decay ablation.** B2 (section 5) ran without decay; re-run it.
 
 ## Files
 

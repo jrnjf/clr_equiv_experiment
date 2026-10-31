@@ -55,6 +55,12 @@ class ExternalDualScheduler:
         self.global_fn = global_schedule(global_name, total_epochs, end_ratio)
         self._step = 0
         self.last_lr = None
+        # Optional manual decoupled weight decay, applied with a CONSTANT lr.
+        # Needed because torch.optim.SGD can only decay against group['lr'],
+        # which the scheduler overwrites every step -- so "decay scaled by the
+        # base (nominal) lr" is not expressible through torch's API alone.
+        self.manual_wd = 0.0
+        self.manual_wd_lr = 0.0
 
     def lr_at(self, step: int) -> float:
         c = step % self.steps_per_epoch
@@ -75,6 +81,13 @@ class ExternalDualScheduler:
         lr = self.lr_at(self._step)
         for group in self.opt.param_groups:
             group["lr"] = lr
+        if self.manual_wd:
+            # w <- w*(1 - wd*lr_base) BEFORE the gradient update, matching
+            # torch.optim.SGD's ordering: w <- w*(1 - wd*lr) - lr*g
+            with __import__("torch").no_grad():
+                for group in self.opt.param_groups:
+                    for p in group["params"]:
+                        p.data.mul_(1.0 - self.manual_wd * self.manual_wd_lr)
         self.last_lr = lr
         self._applied = True
         return lr
@@ -117,19 +130,36 @@ def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    momentum: float = 0.0):
     """Stock SGD + external schedule.
 
-    Weight-decay coupling is the subtle part: torch.optim.SGD applies decay
-    against group['lr'] only, which here is the *effective* (already scheduled)
-    LR. So with wd_on_effective_lr=True this arm matches DualScheduledSGD
-    exactly. To reproduce the 'decay on base LR only' variant, pass
-    weight_decay=0 here and add the decay term manually.
+    Weight-decay coupling is the subtle part. torch.optim.SGD can only decay
+    against group['lr'], which the scheduler overwrites with the effective
+    (scheduled) LR every step. So:
+      wd_on_effective_lr=True  -> stock SGD decay; matches DualScheduledSGD.
+      wd_on_effective_lr=False -> disable torch's decay and apply it manually
+                                  against the constant base LR (lr_max), which
+                                  is what DualScheduledSGD does in that mode.
+    An earlier version of this function simply passed weight_decay=0 for the
+    False case and never added the manual term, so the "B2" arm silently ran
+    with NO weight decay. Fixed here.
     """
     from torch.optim import SGD
     # start at lr_min: step 0 of the triangular wave is the minimum, and if a
     # caller forgets to prep() before the first step we want the benign value.
+    #
+    # wd_on_effective_lr=True  -> let torch decay against group['lr'], which the
+    #                             scheduler sets to the effective (scheduled) LR
+    # wd_on_effective_lr=False -> torch must NOT decay (it would use the
+    #                             effective LR anyway); instead apply the decay
+    #                             manually against the constant base LR lr_max,
+    #                             which is what DualScheduledSGD does when
+    #                             wd_on_effective_lr=False (group['lr'] stays at
+    #                             lr_max there).
     opt = SGD(model.parameters(), lr=lr_max / lr_SWR, momentum=momentum,
               weight_decay=weight_decay if wd_on_effective_lr else 0.0)
     sch = ExternalDualScheduler(opt, steps_per_epoch, lr_max, lr_SWR,
                                 global_name, total_epochs, end_ratio)
+    if not wd_on_effective_lr:
+        sch.manual_wd = weight_decay
+        sch.manual_wd_lr = lr_max          # constant base LR
     return opt, sch
 
 
