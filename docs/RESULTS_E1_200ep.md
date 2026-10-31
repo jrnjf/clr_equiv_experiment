@@ -24,12 +24,12 @@ faithful**, so any difference between arms below is real behaviour, not a bug.
 
 ## 2. Final accuracy (test split)
 
-| arm | s0 | s1 | s2 | mean | sd |
-|---|---|---|---|---|---|
-| A_internal | 0.9537 | 0.9508 | 0.9520 | **0.9522** | 0.0015 |
-| B1_external_wd_eff | 0.9497 | 0.9544 | 0.9535 | **0.9525** | 0.0025 |
-| B2_external_wd_base | 0.9301 | 0.9325 | 0.9326 | 0.9317 | 0.0014 |
-| C_cosine_only | 0.9499 | 0.9487 | 0.9492 | 0.9493 | 0.0006 |
+| arm                 | s0     | s1     | s2     | mean       | sd     |
+| ------------------- | ------ | ------ | ------ | ---------- | ------ |
+| A_internal          | 0.9537 | 0.9508 | 0.9520 | **0.9522** | 0.0015 |
+| B1_external_wd_eff  | 0.9497 | 0.9544 | 0.9535 | **0.9525** | 0.0025 |
+| B2_external_wd_base | 0.9301 | 0.9325 | 0.9326 | 0.9317     | 0.0014 |
+| C_cosine_only       | 0.9499 | 0.9487 | 0.9492 | 0.9493     | 0.0006 |
 
 Paired by seed, n=3, |t| ≥ 4.30 needed for p<0.05:
 
@@ -58,12 +58,12 @@ Robustness checks, because "measured at the epoch boundary" can be a
 favorable-phase artifact (the triangular wave ends each epoch at its *minimum*
 LR, and Smith recommends reporting at exactly that point):
 
-| check | A | B1 | B2 | C |
-|---|---|---|---|---|
-| raw | 18 | 15 | 20 | 98 |
-| 5-epoch moving average | 19 | 18 | 21 | **127** |
-| best accuracy in first 20 epochs | 0.9106 | 0.9105 | 0.9066 | 0.8290 |
-| best in first 100 epochs | — | — | — | 0.9086 |
+| check                            | A      | B1     | B2     | C       |
+| -------------------------------- | ------ | ------ | ------ | ------- |
+| raw                              | 18     | 15     | 20     | 98      |
+| 5-epoch moving average           | 19     | 18     | 21     | **127** |
+| best accuracy in first 20 epochs | 0.9106 | 0.9105 | 0.9066 | 0.8290  |
+| best in first 100 epochs         | —      | —      | —      | 0.9086  |
 
 The gap survives smoothing and best-so-far, so it is not an evaluation-timing
 artifact. Cosine-only is also visibly **erratic** (see figure): accuracy swings

@@ -300,3 +300,48 @@ class TestWeightDecayConventions(unittest.TestCase):
 
         self.assertLess(run(5e-4, False), run(0.0, True),
                         "decay against base LR should shrink weights more than no decay")
+
+
+class TestLoggingDoesNotAffectTraining(unittest.TestCase):
+    """Logging must be observation-only.
+
+    This also guards the performance refactor: metrics are now computed only on
+    logged steps, so a mistake there could silently change training. Results at
+    log_every=1 and log_every=100000 must be bit-identical.
+    """
+
+    def test_log_every_invariance(self):
+        try:
+            import json, os, tempfile
+            import torch
+        except ImportError:
+            self.skipTest("torch not installed")
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+        from backends import build as build_backend
+        from dual_scheduler import build_external
+        from trainer import run_arm
+
+        cfg_path = os.path.join(os.path.dirname(__file__), "..", "configs", "tiny.json")
+        cfg = json.load(open(cfg_path))
+        cfg["epochs"] = 2
+        tl, _v, _t, make_model, eval_fn, spe = build_backend(cfg)
+
+        def builder(model):
+            return build_external(model, steps_per_epoch=spe, lr_max=cfg["lr_max"],
+                                  lr_SWR=cfg["lr_SWR"],
+                                  global_name=cfg["global_schedule"],
+                                  total_epochs=cfg["epochs"],
+                                  end_ratio=cfg["end_ratio"],
+                                  weight_decay=cfg["weight_decay"],
+                                  wd_on_effective_lr=True)
+
+        out = {}
+        for le in (1, 100000):
+            with tempfile.TemporaryDirectory() as td:
+                out[le] = run_arm("t", make_model, builder, tl, eval_fn,
+                                  epochs=2, steps_per_epoch=spe, device="cpu",
+                                  log_every=le, out_dir=td, seed=0)
+        self.assertEqual(out[1]["final_val_acc"], out[100000]["final_val_acc"])
+        self.assertEqual([h["val_acc"] for h in out[1]["val_history"]],
+                         [h["val_acc"] for h in out[100000]["val_history"]])

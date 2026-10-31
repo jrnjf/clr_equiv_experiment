@@ -182,6 +182,11 @@ arms sit at peak 0.8 / mean 0.44, so constant-LR controls (mean-matched 0.440,
 RMS-matched 0.487) are still required before claiming oscillation matters rather
 than a large average LR.
 
+## Performance
+
+`log_every` gates all per-step metric computation (not just the CSV write).
+See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for why per-step logging cost ~2x.
+
 ## Layout
 
 ```

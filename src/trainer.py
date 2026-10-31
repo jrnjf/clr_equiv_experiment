@@ -117,6 +117,7 @@ def run_arm(
     rows = []
     val_hist = []          # per-epoch validation curve (for time-to-threshold)
     global_step = 0
+    csv_buffer = []        # batched CSV writes (see note in the inner loop)
 
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
@@ -134,42 +135,67 @@ def run_arm(
                 out = model(x)
                 loss = criterion(out, y)
                 loss.backward()
-                loss_value = float(loss.detach())
 
-                # measured BEFORE the update, so it reflects the step that is about
-                # to be taken (this is the quantity that diverges first)
-                grad_norm = float(
-                    torch.sqrt(sum((p.grad.detach() ** 2).sum()
-                                   for p in model.parameters() if p.grad is not None))
-                )
-                # The LR actually used for THIS step. Reading group['lr'] is
-                # wrong for optimizers that carry the schedule internally
-                # (DualScheduledSGD never touches group['lr']; it holds lr_max
-                # forever), which made internal-arm logs read a constant 0.8.
-                if hasattr(opt, "effective_lr"):
-                    sc = opt.state.get(next(iter(opt.state)), {}).get("step_count", 0)                          if opt.state else 0
-                    lr_now = float(opt.effective_lr(sc))
-                elif sched is not None and getattr(sched, "last_lr", None) is not None \
-                        and getattr(sched, "_applied", False):
-                    lr_now = float(sched.last_lr)
-                else:
-                    lr_now = float(opt.param_groups[0]["lr"])
+                # ------------------------------------------------------------
+                # Logging is gated *before* any synchronisation. Every
+                # float()/.item() on a CUDA tensor blocks the CPU until the GPU
+                # queue drains, and each one costs a pipeline refill. An earlier
+                # version computed all metrics on every step and only gated the
+                # CSV write, which cost ~6 explicit syncs plus -- because
+                # `max()` over a generator of CUDA tensors syncs on EVERY
+                # comparison -- roughly one more sync per parameter tensor.
+                # On ResNet-18 that is ~60 syncs/step, which is the likely
+                # reason this trainer ran ~2x slower than a metrics-free loop.
+                # Now: zero syncs on non-logged steps.
+                # ------------------------------------------------------------
+                should_log = (global_step % log_every == 0)
 
-                train_step(opt, sched, loss)   # ordering handled in one place
+                if should_log:
+                    loss_value = float(loss.detach())          # 1 sync
 
-                with torch.no_grad():
-                    acc = (out.argmax(1) == y).float().mean().item()
-                    wnorm = float(torch.sqrt(sum((p.detach() ** 2).sum()
-                                                 for p in model.parameters())))
-                    pmax = float(max((p.detach().abs().max() for p in model.parameters()),
-                                     default=0.0))
+                    # one reduction -> one sync, instead of one per tensor
+                    grads = [q.grad.detach() for q in model.parameters()
+                             if q.grad is not None]
+                    grad_norm = float(torch.sqrt(
+                        sum((g * g).sum() for g in grads)))    # 1 sync
 
-                if global_step % log_every == 0:
-                    w.writerow([global_step, epoch, step_in_epoch, lr_now,
-                                loss_value, acc, grad_norm, wnorm, pmax])
+                    # The LR actually used for THIS step. Reading group['lr'] is
+                    # wrong for optimizers that carry the schedule internally
+                    # (DualScheduledSGD never touches group['lr']; it holds
+                    # lr_max forever), which made internal-arm logs read 0.8.
+                    if hasattr(opt, "effective_lr"):
+                        sc = (opt.state.get(next(iter(opt.state)), {})
+                              .get("step_count", 0)) if opt.state else 0
+                        lr_now = float(opt.effective_lr(sc))   # pure python
+                    elif sched is not None and \
+                            getattr(sched, "last_lr", None) is not None and \
+                            getattr(sched, "_applied", False):
+                        lr_now = float(sched.last_lr)          # pure python
+                    else:
+                        lr_now = float(opt.param_groups[0]["lr"])
+
+                    with torch.no_grad():
+                        ps = [q.detach() for q in model.parameters()]
+                        wnorm = float(torch.sqrt(
+                            sum((q * q).sum() for q in ps)))    # 1 sync
+                        pmax = float(torch.stack(
+                            [q.abs().max() for q in ps]).max())  # 1 sync
+                        acc = float((out.argmax(1) == y).float().mean())  # 1 sync
+
+                    csv_buffer.append([global_step, epoch, step_in_epoch,
+                                       lr_now, loss_value, acc, grad_norm,
+                                       wnorm, pmax])
                     rows.append({"loss": loss_value, "acc": acc})
 
+                    if len(csv_buffer) >= 200:
+                        w.writerows(csv_buffer)
+                        csv_buffer.clear()
+
+                train_step(opt, sched, loss)   # ordering handled in one place
                 global_step += 1
+            if csv_buffer:            # flush leftovers at the epoch boundary
+                w.writerows(csv_buffer)
+                csv_buffer.clear()
 
             val_loss, val_acc = eval_fn(model, None)
             val_hist.append({"epoch": epoch + 1, "val_loss": val_loss,
