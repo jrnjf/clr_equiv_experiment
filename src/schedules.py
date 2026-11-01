@@ -101,7 +101,8 @@ def mean_effective_lr(steps_per_epoch: int, lr_max: float, lr_SWR: float,
 def matched_weight_decays(wd_effective: float, steps_per_epoch: int,
                           lr_max: float, lr_SWR: float, epochs: int,
                           global_name: str = "cosine",
-                          end_ratio: float = 1e-4) -> dict:
+                          end_ratio: float = 1e-4,
+                          target_mean_shrink: float | None = None) -> dict:
     """Weight-decay coefficients giving EQUAL mean per-step shrink.
 
     The three conventions shrink weights by different amounts at the same
@@ -118,7 +119,14 @@ def matched_weight_decays(wd_effective: float, steps_per_epoch: int,
     """
     mean_lr = mean_effective_lr(steps_per_epoch, lr_max, lr_SWR, epochs,
                                 global_name, end_ratio)
-    lam = wd_effective * mean_lr            # mean per-step shrink of "effective"
+    if target_mean_shrink is not None:
+        # Interpret the requested strength as the LR-WEIGHTED AVERAGE of the
+        # decay: mean(wd * lr_eff) = target. The "effective" coefficient must
+        # then be target / mean_lr, which is much larger than target itself.
+        lam = float(target_mean_shrink)
+        wd_effective = lam / mean_lr
+    else:
+        lam = wd_effective * mean_lr         # mean per-step shrink of "effective"
     return {
         "effective": wd_effective,
         "base": lam / lr_max,

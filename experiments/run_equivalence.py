@@ -105,7 +105,8 @@ def wd_for_arm(cfg, spe):
     from schedules import matched_weight_decays
     m = matched_weight_decays(cfg["weight_decay"], spe, cfg["lr_max"],
                               cfg["lr_SWR"], cfg["epochs"],
-                              cfg["global_schedule"], cfg["end_ratio"])
+                              cfg["global_schedule"], cfg["end_ratio"],
+                              target_mean_shrink=cfg.get("target_mean_shrink"))
     return m
 
 
@@ -114,7 +115,10 @@ def make_opt_builder(cfg, spe, arm):
     common = dict(steps_per_epoch=spe, lr_max=cfg["lr_max"],
                   lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
                   total_epochs=cfg["epochs"], end_ratio=cfg["end_ratio"],
-                  weight_decay=cfg["weight_decay"],
+                  # For the "effective" convention this is the RESOLVED
+                  # coefficient, which equals cfg["weight_decay"] unless
+                  # target_mean_shrink is set.
+                  weight_decay=m["effective"],
                   momentum=cfg.get("momentum", 0.0))
 
     def build(model):
