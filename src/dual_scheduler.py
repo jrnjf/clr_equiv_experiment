@@ -3,9 +3,21 @@ The schedule, expressed the way PyTorch expects.
 
     lr(t) = lr_max * triangle(t mod steps_per_epoch) * cosine(t / steps_per_epoch)
 
+**Prior art, stated plainly.** Neither component is ours:
+
+* the triangular cycle is Smith's Cyclical Learning Rate policy
+  (arXiv:1506.01186), defined per-iteration exactly like this;
+* the cosine anneal is Loshchilov & Hutter's cosine schedule
+  (arXiv:1608.03983), used here as a multiplier rather than as a restart.
+
+Composing the two is a two-line `LambdaLR`. There is no novelty in the schedule
+itself and the code should not imply any. What the experiments test is the
+*regime* it is run in (peak lr 0.8, no momentum, an anneal to ~1e-4 of peak) and
+how fast it reaches a given accuracy -- not the existence of the schedule.
+
 `triangle` is normalised to [1/lr_SWR, 1] so it peaks at lr_max, and `cosine`
-starts at 1 and anneals to `end_ratio`. Because it is a plain multiplier on the
-LR, it plugs straight into `torch.optim.lr_scheduler.LambdaLR`:
+starts at 1 and anneals to `end_ratio`. Being a plain multiplier on the LR, it
+plugs straight into `torch.optim.lr_scheduler.LambdaLR`:
 
     opt   = SGD(params, lr=lr_max, weight_decay=..., momentum=...)
     sched = LambdaLR(opt, dual_schedule_lambda(...))

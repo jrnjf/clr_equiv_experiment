@@ -1,5 +1,11 @@
 """
-DualScheduledSGD — vanilla SGD with dual scheduling.
+DualScheduledSGD — vanilla SGD with the schedule inside the optimizer.
+
+Kept for the equivalence test only. The method path uses stock
+`torch.optim.SGD` + `LambdaLR`; this class exists to show the two produce the
+same trajectory, and to document that the schedule is Smith's triangular CLR
+(arXiv:1506.01186) times a cosine anneal (arXiv:1608.03983) -- established
+components, trivially composed.
 
 Extracted verbatim in behaviour from the research `sgd_dual_schd.py`
 (sha256 29b1db30...), with three differences, all deliberate:

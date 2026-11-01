@@ -1,5 +1,11 @@
 # Experiment plan after E1
 
+> **Prior art.** The schedule is Smith's triangular cyclical LR
+> (arXiv:1506.01186) multiplied by a cosine anneal (arXiv:1608.03983). Both are
+> established, and combining them is a two-line `LambdaLR`; we claim no novelty
+> for the schedule. What is being tested is the regime (peak lr 0.8, no momentum,
+> anneal to ~1e-4 of peak) and the time-to-accuracy behaviour.
+>
 > **Design simplified (current).** The custom scheduler and all weight-decay
 > instrumentation are gone. The method is now stock PyTorch:
 >
