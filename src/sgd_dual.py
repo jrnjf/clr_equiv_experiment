@@ -72,7 +72,6 @@ class DualScheduledSGD(Optimizer):
         weight_decay: float = 0.0,
         momentum: float = 0.0,
         wd_on_effective_lr: bool = True,
-        wd_mode: str | None = None,
     ):
         if lr_SWR <= 0.0:
             raise ValueError(f"lr_SWR must be positive, got {lr_SWR}")
@@ -92,11 +91,6 @@ class DualScheduledSGD(Optimizer):
 
         self.global_schedule = global_schedule
         self.wd_on_effective_lr = wd_on_effective_lr
-        if wd_mode is None:
-            wd_mode = "effective" if wd_on_effective_lr else "base"
-        if wd_mode not in ("effective", "base", "none"):
-            raise ValueError(f"unknown wd_mode {wd_mode!r}")
-        self.wd_mode = wd_mode
         self._triangle = TriangleWave()
         self._steps_done = 0
 
@@ -167,19 +161,10 @@ class DualScheduledSGD(Optimizer):
                 # the already-updated weight; measured divergence 3.2e-6 after a
                 # single step, 2.1e-4 after 40.
                 if weight_decay != 0:
-                    if self.wd_mode == "effective":
-                        wd_lr = lr_effective          # triangle x cosine
-                    elif self.wd_mode == "base":
-                        # ANNEALED base lr = peak of the triangle envelope.
-                        # group["lr"] alone is constant lr_max, which drops the
-                        # cosine -- see the note in dual_scheduler.prep().
-                        base = group["lr"]
-                        if self.global_schedule is not None:
-                            base *= self.global_schedule(self.epoch_fraction())
-                        wd_lr = base
-                    else:                             # "none"
-                        wd_lr = 1.0                   # no LR scaling at all
-                    p.data.mul_(1.0 - weight_decay * wd_lr)
+                    # torch.optim.SGD semantics: decay is scaled by the LR
+                    # (sgd.py:355 then :379). Here the LR is lr_effective,
+                    # because this optimizer carries the schedule internally.
+                    p.data.mul_(1.0 - weight_decay * lr_effective)
 
                 p.data.add_(d_p, alpha=-lr_effective)
 

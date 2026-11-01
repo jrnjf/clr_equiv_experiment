@@ -54,12 +54,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from dual_scheduler import (assert_same_lr_series, build_external,
-                            build_internal, train_step)
+from dual_scheduler import (assert_same_lr_series, build_cosine_only,
+                            build_internal, build_method, lr_series,
+                            train_step)
 from schedules import effective_lr_series
 
-ARMS = ("A_internal", "B1_external_wd_eff", "B2_external_wd_base",
-        "F_external_wd_none", "C_cosine_only")
+ARMS = ("A_internal", "B1_external_wd_eff", "C_cosine_only")
 
 DEFAULTS = {
     "backend": "tiny",
@@ -114,15 +114,10 @@ def make_opt_builder(cfg, spe, arm):
         if arm == "A_internal":
             return build_internal(model, wd_on_effective_lr=True, **common)
         if arm == "B1_external_wd_eff":
-            return build_external(model, wd_on_effective_lr=True, **common)
-        if arm == "B2_external_wd_base":
-            return build_external(model, wd_mode="base", **common)
-        if arm == "F_external_wd_none":
-            return build_external(model, wd_mode="none", **common)
+            return build_method(model, **common)
+
         if arm == "C_cosine_only":
-            c = dict(common)
-            c["lr_SWR"] = 1.0          # min == max -> no triangular component
-            return build_external(model, wd_on_effective_lr=True, **c)
+            return build_cosine_only(model, **common)
         raise ValueError(arm)
 
     return build
@@ -157,9 +152,9 @@ def dry_run(cfg, allow_odd=False):
                                   end_ratio=cfg["end_ratio"])
     print(f"\nLR series internal vs external: max|diff| = {worst:.3e} -> PASS")
 
-    series = effective_lr_series(spe, cfg["lr_max"], cfg["lr_SWR"],
-                                 cfg["epochs"], cfg["global_schedule"],
-                                 cfg["end_ratio"])
+    series = lr_series(spe, cfg["lr_max"], cfg["lr_SWR"], spe * cfg["epochs"],
+                       cfg["epochs"], cfg["end_ratio"],
+                       cfg["global_schedule"])
     ep0 = series[:spe]
     print(f"  first={series[0]:.6f} peak_ep0={max(ep0):.5f} "
           f"last={series[-1]:.6f} mean={sum(series)/len(series):.5f}")

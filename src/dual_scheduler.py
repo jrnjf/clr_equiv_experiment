@@ -1,236 +1,148 @@
 """
-Wrappers that build the two arms of the equivalence experiment.
+The schedule, expressed the way PyTorch expects.
 
-Arm A (internal)  : DualScheduledSGD carries the schedule inside the optimizer.
-Arm B (external)  : stock torch.optim.SGD + a schedule applied from outside.
+    lr(t) = lr_max * triangle(t mod steps_per_epoch) * cosine(t / steps_per_epoch)
 
-Both must produce the *same* per-step learning rate series; that is asserted by
-`assert_same_lr_series` below and checked in tests/.
+`triangle` is normalised to [1/lr_SWR, 1] so it peaks at lr_max, and `cosine`
+starts at 1 and anneals to `end_ratio`. Because it is a plain multiplier on the
+LR, it plugs straight into `torch.optim.lr_scheduler.LambdaLR`:
+
+    opt   = SGD(params, lr=lr_max, weight_decay=..., momentum=...)
+    sched = LambdaLR(opt, dual_schedule_lambda(...))
+    ...
+    opt.step()
+    sched.step()
+
+Weight decay needs no handling at all: torch.optim.SGD computes
+`grad + wd*param` and then `param -= lr*grad` (sgd.py lines 355 and 379), so the
+decay is already multiplied by the current lr, which LambdaLR keeps updated.
+No param loop, no custom optimizer, no manual decay.
 """
 
 from __future__ import annotations
 
-from schedules import global_schedule, triangle_wave
-
-# torch is imported lazily so the LR-series equivalence (the mathematical claim)
-# can be checked on a machine with no torch installed -- see --dry-run.
+from schedules import cosine_anneal, triangle_wave
 
 
-class ExternalDualScheduler:
-    """Applies ``global_multiplier(epoch) * triangle(step_in_epoch)`` to an optimizer.
+def dual_schedule_lambda(steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                         total_epochs: float, end_ratio: float = 1e-4,
+                         global_name: str = "cosine"):
+    """Return f(step) -> LR multiplier for LambdaLR."""
+    if lr_SWR < 1.0:
+        raise ValueError("lr_SWR must be >= 1")
+    if steps_per_epoch < 2:
+        raise ValueError("steps_per_epoch must be >= 2")
 
-    This is the minimal, explicit counterpart to DualScheduledSGD's internal
-    scheduling. It writes the LR into ``param_group['lr']`` before each step, so
-    it works with any optimizer (including the stock SGD we compare against).
+    def lr_lambda(step: int) -> float:
+        local = triangle_wave(step % steps_per_epoch, steps_per_epoch,
+                              1.0, 1.0 / lr_SWR)
+        if global_name in ("cosine", "cos"):
+            g = cosine_anneal(step / float(steps_per_epoch), total_epochs,
+                              end_ratio)
+        elif global_name in ("constant", "none", None):
+            g = 1.0
+        else:
+            raise ValueError(f"unknown global schedule {global_name!r}")
+        return local * g
 
-    Why not torch.optim.lr_scheduler.CyclicLR?
-    -------------------------------------------
-    Because CyclicLR cannot be multiplied by a second schedule: it *sets* the LR
-    to a single interpolated value. Composing two torch schedulers is not
-    supported. This wrapper implements the composition `global * local` directly,
-    which is exactly what DualScheduledSGD does internally. The CyclicLR
-    algorithm itself is replicated in reference_schedulers.py and asserted
-    equivalent to `triangle_wave` by tests/.
+    return lr_lambda
 
-    Even-steps requirement
-    ----------------------
-    `steps_per_epoch` must be EVEN. For odd values the triangular wave's peak
-    falls between two steps, and (measured) no CyclicLR configuration
-    reproduces the internal wave to better than 1.5e-2 absolute. Since the point
-    of this experiment is bit-level equivalence, even values are enforced.
+
+def lr_series(steps_per_epoch: int, lr_max: float, lr_SWR: float, n_steps: int,
+              total_epochs: float, end_ratio: float = 1e-4,
+              global_name: str = "cosine") -> list[float]:
+    """The exact LR sequence LambdaLR produces, for auditing and plots."""
+    f = dual_schedule_lambda(steps_per_epoch, lr_max, lr_SWR, total_epochs,
+                             end_ratio, global_name)
+    return [lr_max * f(t) for t in range(n_steps)]
+
+
+def train_step(opt, sched, loss=None):
+    """Standard PyTorch order: optimizer, then scheduler.
+
+    LRScheduler applies lambda(0) in its constructor, so the first opt.step()
+    already uses the schedule's first value, and each sched.step() advances to
+    the next. No off-by-one, and no need for the prep()/advance() dance that
+    earlier cost a 7.6e-2 relative parameter error.
     """
+    opt.step()
+    if sched is not None:
+        sched.step()
 
-    def __init__(self, optimizer, steps_per_epoch: int, lr_max: float,
-                 lr_SWR: float, global_name: str = "cosine",
-                 total_epochs: float = 1.0, end_ratio: float = 0.01):
-        if steps_per_epoch % 2 != 0:
-            raise ValueError(
-                f"steps_per_epoch must be even for exact equivalence, got "
-                f"{steps_per_epoch}. Use 2*ceil(n/2) or drop the last partial batch."
-            )
-        self.opt = optimizer
-        self.steps_per_epoch = steps_per_epoch
-        self.lr_max = lr_max
-        self.lr_min = lr_max / lr_SWR
-        self.global_fn = global_schedule(global_name, total_epochs, end_ratio)
-        self._step = 0
-        self.last_lr = None
-        # Weight-decay mode. torch.optim.SGD can only decay against group['lr'],
-        # which the scheduler overwrites with the effective LR every step. The
-        # other two conventions therefore need the decay applied by hand:
-        #   "effective" : let torch do it  -> w *= (1 - wd * lr_effective)
-        #   "base"      : manual           -> w *= (1 - wd * lr_max)
-        #   "none"      : manual           -> w *= (1 - wd)
-        # "base" and "none" are constants, so their per-step shrink does NOT
-        # anneal while "effective" does. Compare them at matched mean strength.
-        self.wd_mode = "effective"
-        self.manual_wd = 0.0
-        self.manual_wd_factor = 1.0
 
-    def lr_at(self, step: int) -> float:
-        c = step % self.steps_per_epoch
-        local = triangle_wave(c, self.steps_per_epoch, self.lr_max, self.lr_min)
-        return local * self.global_fn(step / self.steps_per_epoch)
+# ---------------------------------------------------------------------------
+# Builders
+# ---------------------------------------------------------------------------
+def build_method(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                 global_name: str, total_epochs: float, end_ratio: float,
+                 weight_decay: float, momentum: float = 0.0,
+                 **_ignored):
+    """The method: stock SGD + LambdaLR. Nothing custom."""
+    from torch.optim import SGD
+    from torch.optim.lr_scheduler import LambdaLR
 
-    def prep(self) -> float:
-        """Apply the LR for the CURRENT step; call BEFORE optimizer.step().
+    opt = SGD(model.parameters(), lr=lr_max, momentum=momentum,
+              weight_decay=weight_decay)
+    sched = LambdaLR(opt, dual_schedule_lambda(steps_per_epoch, lr_max, lr_SWR,
+                                               total_epochs, end_ratio,
+                                               global_name))
+    return opt, sched
 
-        Ordering matters and is the single easiest way to break equivalence:
-        DualScheduledSGD computes its LR inside `step()`, i.e. it uses the LR for
-        step t when taking step t. An external scheduler that is stepped *after*
-        optimizer.step() leaves optimizer.step() using whatever LR was set last
-        time -- so the very first step would use lr_max (0.8) instead of lr_min
-        (0.08), a 10x error on step 0. Measured effect before this fix:
-        final-parameter relative difference 7.6e-2.
-        """
-        lr = self.lr_at(self._step)
-        for group in self.opt.param_groups:
-            group["lr"] = lr
-        if self.manual_wd:
-            # Decay factor per convention:
-            #   "base" : the ANNEALED base lr, i.e. lr_max * global(epoch) --
-            #            the peak of the triangle envelope at this step. Using a
-            #            constant lr_max here (an earlier bug) silently dropped
-            #            the cosine, which made "base" a plain constant multiply
-            #            and therefore identical to "none" once strength was
-            #            matched. That is why the pilot reported 0.9406 twice.
-            #   "none" : 1.0, no lr scaling at all.
-            if self.wd_mode == "base":
-                factor = self.lr_max * self.global_fn(
-                    self._step / float(self.steps_per_epoch))
-            else:
-                factor = 1.0
-            # w <- w*(1 - wd*factor) BEFORE the gradient update, matching
-            # torch.optim.SGD's ordering: w <- w*(1 - wd*lr) - lr*g
-            with __import__("torch").no_grad():
-                for group in self.opt.param_groups:
-                    for p in group["params"]:
-                        p.data.mul_(1.0 - self.manual_wd * factor)
-        self.last_lr = lr
-        self._applied = True
-        return lr
 
-    def advance(self) -> None:
-        """Call AFTER optimizer.step() to move to the next step."""
-        if not getattr(self, "_applied", False):
-            raise RuntimeError("advance() called before prep(); the optimizer "
-                               "would take a step with a stale learning rate.")
-        self._applied = False
-        self._step += 1
+def build_cosine_only(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                      global_name: str, total_epochs: float, end_ratio: float,
+                      weight_decay: float, momentum: float = 0.0, **_ignored):
+    """Baseline: cosine annealing only, no triangular component."""
+    from torch.optim import SGD
+    from torch.optim.lr_scheduler import LambdaLR
 
-    def step(self) -> None:
-        """Backwards-compatible alias: prep() only (no advance)."""
-        self.prep()
+    opt = SGD(model.parameters(), lr=lr_max, momentum=momentum,
+              weight_decay=weight_decay)
+    sched = LambdaLR(opt, dual_schedule_lambda(steps_per_epoch, lr_max, 1.0,
+                                               total_epochs, end_ratio,
+                                               global_name))
+    return opt, sched
 
 
 def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    global_name: str, total_epochs: float, end_ratio: float,
                    weight_decay: float, wd_on_effective_lr: bool = True,
-                   momentum: float = 0.0):
+                   momentum: float = 0.0, **_ignored):
+    """Reference only: the custom optimizer, kept so equivalence stays testable."""
+    from schedules import global_schedule
     from sgd_dual import DualScheduledSGD
-    sched = global_schedule(global_name, total_epochs, end_ratio)
+
     opt = DualScheduledSGD(
-        model.parameters(),
-        steps_per_epoch=steps_per_epoch,
-        lr=lr_max,
+        model.parameters(), steps_per_epoch=steps_per_epoch, lr=lr_max,
         lr_SWR=lr_SWR,
-        global_schedule=sched,
-        weight_decay=weight_decay,
-        momentum=momentum,
-        wd_on_effective_lr=wd_on_effective_lr,
-    )
+        global_schedule=global_schedule(global_name, total_epochs, end_ratio),
+        weight_decay=weight_decay, momentum=momentum,
+        wd_on_effective_lr=wd_on_effective_lr)
     return opt, None
-
-
-def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
-                   global_name: str, total_epochs: float, end_ratio: float,
-                   weight_decay: float, wd_on_effective_lr: bool = True,
-                   momentum: float = 0.0, wd_mode: str | None = None):
-    """Stock SGD + external schedule.
-
-    Weight-decay coupling is the subtle part. torch.optim.SGD can only decay
-    against group['lr'], which the scheduler overwrites with the effective
-    (scheduled) LR every step. So:
-      wd_on_effective_lr=True  -> stock SGD decay; matches DualScheduledSGD.
-      wd_on_effective_lr=False -> disable torch's decay and apply it manually
-                                  against the constant base LR (lr_max), which
-                                  is what DualScheduledSGD does in that mode.
-    An earlier version of this function simply passed weight_decay=0 for the
-    False case and never added the manual term, so the "B2" arm silently ran
-    with NO weight decay. Fixed here.
-    """
-    from torch.optim import SGD
-    # start at lr_min: step 0 of the triangular wave is the minimum, and if a
-    # caller forgets to prep() before the first step we want the benign value.
-    #
-    # wd_on_effective_lr=True  -> let torch decay against group['lr'], which the
-    #                             scheduler sets to the effective (scheduled) LR
-    # wd_on_effective_lr=False -> torch must NOT decay (it would use the
-    #                             effective LR anyway); instead apply the decay
-    #                             manually against the constant base LR lr_max,
-    #                             which is what DualScheduledSGD does when
-    #                             wd_on_effective_lr=False (group['lr'] stays at
-    #                             lr_max there).
-    # `wd_mode` supersedes the boolean; keep the boolean for old call sites.
-    if wd_mode is None:
-        wd_mode = "effective" if wd_on_effective_lr else "base"
-    if wd_mode not in ("effective", "base", "none"):
-        raise ValueError(f"unknown wd_mode {wd_mode!r}")
-    use_torch_wd = (wd_mode == "effective")
-    opt = SGD(model.parameters(), lr=lr_max / lr_SWR, momentum=momentum,
-              weight_decay=weight_decay if use_torch_wd else 0.0)
-    sch = ExternalDualScheduler(opt, steps_per_epoch, lr_max, lr_SWR,
-                                global_name, total_epochs, end_ratio)
-    sch.wd_mode = wd_mode
-    if not use_torch_wd:
-        sch.manual_wd = weight_decay
-        sch.manual_wd_factor = 1.0        # "base" computes its factor per step
-    return opt, sch
 
 
 def assert_same_lr_series(steps_per_epoch: int, lr_max: float, lr_SWR: float,
                           n_steps: int, global_name: str = "cosine",
-                          total_epochs: float = 1.0, end_ratio: float = 0.01,
+                          total_epochs: float = 1.0, end_ratio: float = 1e-4,
                           tol: float = 1e-12) -> float:
-    """Compare the LR series produced by the internal and external paths.
+    """Check LambdaLR's output against the analytic sequence."""
+    import torch
+    from torch.optim import SGD
+    from torch.optim.lr_scheduler import LambdaLR
 
-    Returns the max absolute difference. Raises AssertionError if above tol.
-    """
-    lr_min = lr_max / lr_SWR
-    g = global_schedule(global_name, total_epochs, end_ratio)
-
-    internal = []
-    for step in range(n_steps):
-        c = step % steps_per_epoch
-        local = triangle_wave(c, steps_per_epoch, lr_max, lr_min)
-        internal.append(local * g(step / steps_per_epoch))
-
-    sch = ExternalDualScheduler.__new__(ExternalDualScheduler)  # bypass ctor checks
-    sch.steps_per_epoch = steps_per_epoch
-    sch.lr_max = lr_max
-    sch.lr_min = lr_min
-    sch.global_fn = g
-    external = [sch.lr_at(step) for step in range(n_steps)]
-
-    worst = max(abs(a - b) for a, b in zip(internal, external))
-    assert worst <= tol, f"LR series differ by {worst:.3e} > {tol:.3e}"
-    return worst
-
-
-def train_step(opt, sched, loss):
-    """One correct optimization step, handling both scheduler styles.
-
-    This exists so the *ordering* is written down exactly once:
-
-      external scheduler : prep() -> opt.step() -> advance()
-      internal scheduler : opt.step()            (LR computed inside)
-
-    Getting this order wrong is the failure mode that made the first
-    equivalence run disagree by 7.6e-2 relative.
-    """
-    if sched is None:
+    p = torch.nn.Parameter(torch.zeros(1))
+    opt = SGD([p], lr=lr_max)
+    sched = LambdaLR(opt, dual_schedule_lambda(steps_per_epoch, lr_max, lr_SWR,
+                                               total_epochs, end_ratio,
+                                               global_name))
+    produced = []
+    for _ in range(n_steps):
+        produced.append(opt.param_groups[0]["lr"])
         opt.step()
-        return
-    sched.prep()
-    opt.step()
-    sched.advance()
+        sched.step()
+
+    expected = lr_series(steps_per_epoch, lr_max, lr_SWR, n_steps,
+                         total_epochs, end_ratio, global_name)
+    worst = max(abs(a - b) for a, b in zip(produced, expected))
+    assert worst <= tol, f"LambdaLR series differs by {worst:.3e} > {tol:.3e}"
+    return worst

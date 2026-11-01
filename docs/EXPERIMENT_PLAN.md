@@ -1,5 +1,28 @@
 # Experiment plan after E1
 
+> **Design simplified (current).** The custom scheduler and all weight-decay
+> instrumentation are gone. The method is now stock PyTorch:
+>
+> ```python
+> opt   = torch.optim.SGD(params, lr=0.8, weight_decay=5e-4, momentum=0.0)
+> sched = torch.optim.lr_scheduler.LambdaLR(
+>             opt, lambda t: triangle(t % steps_per_epoch)
+>                            * cosine_scaler(t / steps_per_epoch))
+> ...
+> opt.step(); sched.step()
+> ```
+>
+> No param loop, no manual weight decay: `torch.optim.SGD` already scales decay
+> by the current lr (sgd.py:355 then :379), and LambdaLR keeps that lr current.
+> Arms are now `B1_external_wd_eff` (the method) and `C_cosine_only` (baseline);
+> `A_internal` remains only so equivalence stays testable. B2/F are removed —
+> the weight-decay-convention ablation is closed (result: LR-coupled decay is
+> torch's default; the non-standard no-LR variant collapses).
+>
+> One consequence: the old even-`steps_per_epoch` requirement is gone. It
+> existed only because CyclicLR could not reproduce a fractional half-cycle;
+> LambdaLR can.
+
 E1 (implementation equivalence) is **complete** and is a decision helper, not a
 paper result. Outcome: `A_internal` == `B1_external` (relative 6e-6 float32,
 6e-16 float64), and the scheduler adds no measurable optimizer overhead
