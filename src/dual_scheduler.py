@@ -125,7 +125,37 @@ def assert_same_lr_series(steps_per_epoch: int, lr_max: float, lr_SWR: float,
                           n_steps: int, global_name: str = "cosine",
                           total_epochs: float = 1.0, end_ratio: float = 1e-4,
                           tol: float = 1e-12) -> float:
-    """Check LambdaLR's output against the analytic sequence."""
+    """Torch-free check that the lambda matches the intended formula.
+
+    Compares `lr_series()` (which goes through the lambda) against an
+    independently composed triangle x cosine. Keeps `--dry-run` usable on a
+    machine without torch; the LambdaLR alignment itself is checked separately
+    by `assert_lambdalr_alignment()`.
+    """
+    produced = lr_series(steps_per_epoch, lr_max, lr_SWR, n_steps,
+                         total_epochs, end_ratio, global_name)
+    expected = []
+    for t in range(n_steps):
+        tri = triangle_wave(t % steps_per_epoch, steps_per_epoch,
+                            lr_max, lr_max / lr_SWR)
+        g = (cosine_anneal(t / float(steps_per_epoch), total_epochs, end_ratio)
+             if global_name in ("cosine", "cos") else 1.0)
+        expected.append(tri * g)
+    worst = max(abs(a - b) for a, b in zip(produced, expected))
+    assert worst <= tol, f"schedule differs from the intended formula by {worst:.3e}"
+    return worst
+
+
+def assert_lambdalr_alignment(steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                              n_steps: int, total_epochs: float,
+                              end_ratio: float = 1e-4,
+                              global_name: str = "cosine",
+                              tol: float = 1e-12) -> float:
+    """Check that LambdaLR actually emits the analytic series, step 0 included.
+
+    Requires torch. This is the check that catches an off-by-one between the
+    scheduler and the optimizer.
+    """
     import torch
     from torch.optim import SGD
     from torch.optim.lr_scheduler import LambdaLR

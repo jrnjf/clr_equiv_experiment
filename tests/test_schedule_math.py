@@ -58,10 +58,16 @@ class TestLambdaSchedule(unittest.TestCase):
             self.skipTest("torch not installed")
 
     def test_lambdalr_matches_analytic(self):
-        from dual_scheduler import assert_same_lr_series
-        worst = assert_same_lr_series(390, 0.8, 1000.0, n_steps=2000,
-                                      total_epochs=200, end_ratio=1e-4)
+        from dual_scheduler import assert_lambdalr_alignment
+        worst = assert_lambdalr_alignment(390, 0.8, 1000.0, n_steps=2000,
+                                          total_epochs=200, end_ratio=1e-4)
         self.assertLessEqual(worst, 1e-12)
+
+    def test_formula_check_is_torch_free(self):
+        from dual_scheduler import assert_same_lr_series
+        self.assertLessEqual(
+            assert_same_lr_series(390, 0.8, 1000.0, n_steps=500,
+                                  total_epochs=200, end_ratio=1e-4), 1e-12)
 
     def test_first_step_uses_lr_min_not_lr_max(self):
         """The off-by-one that once cost a 7.6e-2 parameter error. LRScheduler
