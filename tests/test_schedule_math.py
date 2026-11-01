@@ -348,55 +348,50 @@ class TestLoggingDoesNotAffectTraining(unittest.TestCase):
 
 
 class TestWeightDecayModes(unittest.TestCase):
-    """The three conventions must differ only in the DISTRIBUTION of decay,
-    not in mean strength.
+    """Three conventions, same mean strength, different distribution.
 
-    NOTE: matching is over the WHOLE run. Epoch 0 sits at ~2x the run-average
-    effective LR (the cosine has not annealed yet), so any single early epoch
-    shows "effective" decaying harder. Compare over all 200 epochs.
+    effective : wd * triangle(step) * cosine(epoch)   oscillating + annealed
+    base      : wd * lr_max * cosine(epoch)           smooth + annealed
+    none      : wd                                    no lr scaling
+
+    All three must give the same cumulative shrink, otherwise the ablation
+    measures magnitude rather than distribution.
     """
 
-    def test_cumulative_decay_matched_over_full_run(self):
-        from schedules import (effective_lr_series, matched_weight_decays)
+    def _series(self):
+        from schedules import cosine_anneal, effective_lr_series
+        spe, T, lr_max, end = 390, 200, 0.8, 1e-4
+        lr_eff = effective_lr_series(spe, lr_max, 1000.0, T, "cosine", end)
+        return spe, T, lr_max, end, lr_eff
 
-        spe, epochs = 390, 200
-        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
-        m = matched_weight_decays(5e-4, spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
+    def test_cumulative_shrink_matched(self):
+        from schedules import cosine_anneal, matched_weight_decays
+        spe, T, lr_max, end, lr_eff = self._series()
+        m = matched_weight_decays(5e-4, spe, lr_max, 1000.0, T, "cosine", end)
 
-        total = {
-            "effective": sum(m["effective"] * x for x in lr),
-            "base": sum(m["base"] * 0.8 for _ in lr),
-            "none": sum(m["none"] for _ in lr),
-        }
-        print("\n  cumulative per-step shrink over the full run:", total)
-        lo, hi = min(total.values()), max(total.values())
-        self.assertLess((hi - lo) / hi, 1e-6)
+        cum = {"effective": 0.0, "base": 0.0, "none": 0.0}
+        for i, x in enumerate(lr_eff):
+            ep = i / spe                      # fractional epoch, as the code does
+            cum["effective"] += m["effective"] * x
+            cum["base"] += m["base"] * lr_max * cosine_anneal(ep, T, end)
+            cum["none"] += m["none"]
+        print("\n  cumulative shrink:", {k: round(v, 3) for k, v in cum.items()})
+        lo, hi = min(cum.values()), max(cum.values())
+        self.assertLess((hi - lo) / hi, 0.01, f"strengths not matched: {cum}")
 
-        # and the weight trajectory must agree to well under 1%
-        w = {}
-        for k, lam in (("effective", None), ("base", m["base"] * 0.8),
-                       ("none", m["none"])):
-            ww = 1.0
-            for i, x in enumerate(lr):
-                step_lam = (m["effective"] * x) if k == "effective" else lam
-                ww *= (1.0 - step_lam)
-            w[k] = ww
-        print("  final weight after decay only:", {k: round(v, 5) for k, v in w.items()})
-        vals = list(w.values())
-        self.assertLess((max(vals) - min(vals)) / max(vals), 0.01)
-
-    def test_unmatched_would_differ_a_lot(self):
-        """At the SAME coefficient the conventions are NOT comparable."""
-        from schedules import effective_lr_series
-        spe, epochs = 390, 200
-        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
-        wd = 5e-4
-        tot = {
-            "effective": sum(wd * x for x in lr),
-            "base": sum(wd * 0.8 for _ in lr),
-            "none": sum(wd for _ in lr),
-        }
-        print("\n  same wd=5e-4, cumulative shrink:", {k: round(v, 1) for k, v in tot.items()})
-        # none is ~5x, base ~4x the effective convention
-        self.assertGreater(tot["none"] / tot["effective"], 4.0)
-        self.assertGreater(tot["base"] / tot["effective"], 3.0)
+    def test_base_is_annealed_and_differs_from_none(self):
+        """Regression: 'base' used to multiply by a CONSTANT lr_max, dropping the
+        cosine, which made it identical to 'none' once strength was matched
+        (pilot: 0.9406 vs 0.9406)."""
+        from schedules import cosine_anneal, matched_weight_decays
+        spe, T, lr_max, end, _ = self._series()
+        m = matched_weight_decays(5e-4, spe, lr_max, 1000.0, T, "cosine", end)
+        self.assertNotAlmostEqual(m["base"], m["none"], places=12)
+        # "none" scales by 1, so its coefficient IS the target shrink; "base"
+        # scales by the annealed base lr (mean ~0.4), so its coefficient is
+        # 1/mean_base ~2.5x larger.
+        self.assertAlmostEqual(m["base"] / m["none"], 1.0 / m["_mean_base_lr"],
+                               places=6)
+        early = m["base"] * lr_max * cosine_anneal(0, T, end)
+        late = m["base"] * lr_max * cosine_anneal(199, T, end)
+        self.assertGreater(early, 100 * late, "base decay must anneal")

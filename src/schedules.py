@@ -127,10 +127,17 @@ def matched_weight_decays(wd_effective: float, steps_per_epoch: int,
         wd_effective = lam / mean_lr
     else:
         lam = wd_effective * mean_lr         # mean per-step shrink of "effective"
+    # "base" decays against the ANNEALED base lr, whose mean is the mean of
+    # lr_max * global(epoch) -- i.e. the triangle envelope's peak. Using lr_max
+    # here would ignore the cosine and make "base" 2x too weak (and, once
+    # matched, indistinguishable from "none").
+    mean_base = mean_effective_lr(steps_per_epoch, lr_max, 1.0, epochs,
+                                  global_name, end_ratio)
     return {
         "effective": wd_effective,
-        "base": lam / lr_max,
+        "base": lam / mean_base,
         "none": lam,
         "_mean_per_step_shrink": lam,
         "_mean_effective_lr": mean_lr,
+        "_mean_base_lr": mean_base,
     }

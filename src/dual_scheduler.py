@@ -87,12 +87,25 @@ class ExternalDualScheduler:
         for group in self.opt.param_groups:
             group["lr"] = lr
         if self.manual_wd:
+            # Decay factor per convention:
+            #   "base" : the ANNEALED base lr, i.e. lr_max * global(epoch) --
+            #            the peak of the triangle envelope at this step. Using a
+            #            constant lr_max here (an earlier bug) silently dropped
+            #            the cosine, which made "base" a plain constant multiply
+            #            and therefore identical to "none" once strength was
+            #            matched. That is why the pilot reported 0.9406 twice.
+            #   "none" : 1.0, no lr scaling at all.
+            if self.wd_mode == "base":
+                factor = self.lr_max * self.global_fn(
+                    self._step / float(self.steps_per_epoch))
+            else:
+                factor = 1.0
             # w <- w*(1 - wd*factor) BEFORE the gradient update, matching
             # torch.optim.SGD's ordering: w <- w*(1 - wd*lr) - lr*g
             with __import__("torch").no_grad():
                 for group in self.opt.param_groups:
                     for p in group["params"]:
-                        p.data.mul_(1.0 - self.manual_wd * self.manual_wd_factor)
+                        p.data.mul_(1.0 - self.manual_wd * factor)
         self.last_lr = lr
         self._applied = True
         return lr
@@ -171,7 +184,7 @@ def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
     sch.wd_mode = wd_mode
     if not use_torch_wd:
         sch.manual_wd = weight_decay
-        sch.manual_wd_factor = lr_max if wd_mode == "base" else 1.0
+        sch.manual_wd_factor = 1.0        # "base" computes its factor per step
     return opt, sch
 
 

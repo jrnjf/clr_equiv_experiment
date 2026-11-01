@@ -168,9 +168,15 @@ class DualScheduledSGD(Optimizer):
                 # single step, 2.1e-4 after 40.
                 if weight_decay != 0:
                     if self.wd_mode == "effective":
-                        wd_lr = lr_effective          # oscillating / annealed
+                        wd_lr = lr_effective          # triangle x cosine
                     elif self.wd_mode == "base":
-                        wd_lr = group["lr"]           # constant lr_max
+                        # ANNEALED base lr = peak of the triangle envelope.
+                        # group["lr"] alone is constant lr_max, which drops the
+                        # cosine -- see the note in dual_scheduler.prep().
+                        base = group["lr"]
+                        if self.global_schedule is not None:
+                            base *= self.global_schedule(self.epoch_fraction())
+                        wd_lr = base
                     else:                             # "none"
                         wd_lr = 1.0                   # no LR scaling at all
                     p.data.mul_(1.0 - weight_decay * wd_lr)

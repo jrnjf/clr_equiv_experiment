@@ -66,26 +66,51 @@ B2/F keep shrinking after the LR has annealed to ~1e-7, so weights collapse
 110 -> 6.5 and the last-epoch accuracy drops ~1 pp. B1's decay goes to zero with
 the LR, so it holds its peak.
 
-### F is dropped
+### F is NOT identical to B2 (earlier claim was wrong)
 
-At any matched target, "base" and "none" are the same constant multiply
-(analytically identical; empirically 0.9406 vs 0.9406, wnorm 6.54 vs 6.52). Only
-two distinct conditions exist: **coupled (pulsing) vs constant**. Run B1 and B2.
+An earlier version multiplied "base" decay by a **constant** `lr_max`, dropping
+the cosine annealing. That made "base" a plain constant multiply, so once the
+mean strength was matched it was the same run as "none" — which is why the pilot
+reported 0.9406 for both.
+
+The base LR does anneal: `lr_base(t) = lr_max * cosine(epoch)`, the peak of the
+triangle envelope. With that restored, the three conventions are genuinely
+distinct:
+
+| mode | decay factor | profile |
+|---|---|---|
+| effective | `triangle(step) * cosine(epoch)` | oscillating **and** annealed |
+| base | `lr_max * cosine(epoch)` | smooth **and** annealed |
+| none | `1.0` | no LR scaling |
+
+Per-step shrink at target 5e-4, epoch 0 / 100 / 199:
+
+| mode | ep0 | ep100 | ep199 |
+|---|---|---|---|
+| effective | 2e-6 (rises to 2e-3 mid-epoch) | ~1e-6..1e-3 | ~3e-10 |
+| base | 1.0e-3 | 5.0e-4 | 1.6e-7 |
+| none | 5.0e-4 | 5.0e-4 | 5.0e-4 |
+
+Cumulative shrink is matched across all three (7.809 at target 1e-4, 39.0 at
+5e-4), asserted in `tests/test_schedule_math.py::TestWeightDecayModes` together
+with a regression test that "base" must anneal (>100x larger early than late).
+
+All three arms are therefore worth running; the informative contrast is now
+**oscillating vs smooth** decay at equal annealing and equal strength.
 
 ### Coefficients when the LR-weighted average is held at 5e-4
 
-Set `"target_mean_shrink": 5e-4`; the coefficients are derived.
-
-| arm | wd at target 5e-4 | (was, at 1e-4) |
+| arm | wd at target 5e-4 | (target 1e-4) |
 |---|---|---|
 | B1 effective | **2.497e-3** | 5.000e-4 |
-| B2 base | **6.250e-4** | 1.251e-4 |
+| B2 base | **1.2499e-3** | 2.502e-4 |
+| F none | **5.000e-4** | 1.001e-4 |
 
-Cumulative shrink 39 (was 7.8); decay alone would reach `e^-39 ~ 1e-17`.
+Note B2's coefficient roughly doubled versus the earlier (buggy) version, because
+the annealed base mean is ~0.4 rather than 0.8.
 
-**Risk:** 5x the strength at which B2 already collapsed. Both arms may underfit
-and the comparison may be degenerate. Run ONE seed first:
-`configs/e2_highwd.json` (target 5e-4, seeds=[0]).
+**Risk:** 5x the strength at which B2 already collapsed. Run ONE seed first:
+`configs/e2_highwd.json`.
 
 ### Ladder
 
