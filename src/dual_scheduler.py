@@ -116,6 +116,23 @@ def build_cosine_only(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
     return opt, sched
 
 
+def build_constant(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                   global_name: str, total_epochs: float, end_ratio: float,
+                   weight_decay: float, momentum: float = 0.0, **_ignored):
+    """Control: a fixed learning rate, no schedule whatsoever.
+
+    This is the baseline the triangular sweep has to beat. It exists because the
+    triangle's mean LR (about lr_max/2) differs from the cosine-only arm's, so
+    without a mean-matched constant arm, "oscillation helps" and "a lower average
+    LR helps" are indistinguishable.
+    """
+    from torch.optim import SGD
+
+    opt = SGD(model.parameters(), lr=lr_max, momentum=momentum,
+              weight_decay=weight_decay)
+    return opt, None
+
+
 def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    global_name: str, total_epochs: float, end_ratio: float,
                    weight_decay: float, wd_on_effective_lr: bool = True,

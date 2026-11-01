@@ -54,12 +54,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from dual_scheduler import (assert_same_lr_series, build_cosine_only,
-                            build_internal, build_method, lr_series,
-                            train_step)
+from dual_scheduler import (assert_same_lr_series, build_constant,
+                            build_cosine_only, build_internal, build_method,
+                            lr_series, train_step)
 from schedules import effective_lr_series
 
-ARMS = ("A_internal", "B1_external_wd_eff", "C_cosine_only")
+ARMS = ("A_internal", "B1_external_wd_eff", "C_cosine_only", "constant")
 
 DEFAULTS = {
     "backend": "tiny",
@@ -118,6 +118,8 @@ def make_opt_builder(cfg, spe, arm):
 
         if arm == "C_cosine_only":
             return build_cosine_only(model, **common)
+        if arm == "constant":
+            return build_constant(model, **common)
         raise ValueError(arm)
 
     return build
@@ -231,6 +233,8 @@ def main(argv=None):
     ap.add_argument("--arms", nargs="*", default=list(ARMS))
     ap.add_argument("--out-dir", default=None,
                     help="override cfg['out_dir'] (keeps runs separated)")
+    ap.add_argument("--lr-max", type=float, default=None,
+                    help="override cfg['lr_max'] (for a constant-LR sweep)")
     ap.add_argument("--seeds", nargs="*", type=int, default=None,
                     help="override cfg['seeds'] (e.g. --seeds 0 for a pilot)")
     ap.add_argument("--allow-odd", action="store_true",
@@ -243,6 +247,8 @@ def main(argv=None):
         cfg["out_dir"] = args.out_dir
     if args.seeds is not None:
         cfg["seeds"] = args.seeds
+    if args.lr_max is not None:
+        cfg["lr_max"] = args.lr_max
 
     if args.dry_run:
         return dry_run(cfg, allow_odd=args.allow_odd)
@@ -264,9 +270,12 @@ def main(argv=None):
     results = []
     for seed in cfg["seeds"]:
         for arm in args.arms:
-            print(f"\n=== {arm} | seed {seed} ===")
+            # "constant" sweeps over lr_max, so fold the LR into the run name;
+            # otherwise every LR would overwrite the same (arm, seed) entry.
+            name = (f"constant_lr{cfg['lr_max']:g}" if arm == "constant" else arm)
+            print(f"\n=== {name} | seed {seed} ===")
             results.append(run_arm(
-                arm_name=arm, make_model=make_model,
+                arm_name=name, make_model=make_model,
                 make_optimizer_and_scheduler=make_opt_builder(cfg, spe, arm),
                 train_loader=train_loader, eval_fn=eval_fn,
                 epochs=cfg["epochs"], steps_per_epoch=spe,
