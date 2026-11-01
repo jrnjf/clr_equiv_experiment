@@ -51,6 +51,56 @@ Verified: all three give cumulative shrink 7.8086 and final decay-only weight
 > run-average effective LR (cosine not yet annealed), so a single early epoch
 > shows "effective" decaying harder. Don't judge from one epoch.
 
+## E2v2 — strength ladder (raise the target rather than lower B2)
+
+### Pilot result at mean shrink 1.001e-4 (seed 0)
+
+| arm | raw wd | peak acc | @ep | first 90 | wnorm@50 | wnorm@200 | final |
+|---|---|---|---|---|---|---|---|
+| B1 effective | 5.000e-4 | 0.9499 | 181 | 16 | 38.9 | 24.2 | 0.9492 |
+| B2 base | 1.251e-4 | 0.9500 | 189 | 17 | 48.8 | 6.5 | 0.9406 |
+| F none | 1.001e-4 | 0.9505 | 186 | 17 | 48.8 | 6.5 | 0.9406 |
+
+**Peak accuracy and time-to-90 are indistinguishable.** Only the tail differs:
+B2/F keep shrinking after the LR has annealed to ~1e-7, so weights collapse
+110 -> 6.5 and the last-epoch accuracy drops ~1 pp. B1's decay goes to zero with
+the LR, so it holds its peak.
+
+### F is dropped
+
+At any matched target, "base" and "none" are the same constant multiply
+(analytically identical; empirically 0.9406 vs 0.9406, wnorm 6.54 vs 6.52). Only
+two distinct conditions exist: **coupled (pulsing) vs constant**. Run B1 and B2.
+
+### Coefficients when the LR-weighted average is held at 5e-4
+
+Set `"target_mean_shrink": 5e-4`; the coefficients are derived.
+
+| arm | wd at target 5e-4 | (was, at 1e-4) |
+|---|---|---|
+| B1 effective | **2.497e-3** | 5.000e-4 |
+| B2 base | **6.250e-4** | 1.251e-4 |
+
+Cumulative shrink 39 (was 7.8); decay alone would reach `e^-39 ~ 1e-17`.
+
+**Risk:** 5x the strength at which B2 already collapsed. Both arms may underfit
+and the comparison may be degenerate. Run ONE seed first:
+`configs/e2_highwd.json` (target 5e-4, seeds=[0]).
+
+### Ladder
+
+`configs/e2_midwd.json` (target 2.5e-4) gives an intermediate rung. Running
+1e-4 -> 2.5e-4 -> 5e-4 at one seed per convention turns the ablation into a
+**robustness ladder**: find the strength at which each convention breaks. That
+is a stronger claim than a single point and costs the same 3 runs per rung.
+
+### Metric policy
+
+Report BOTH final-epoch and best-checkpoint accuracy. At 1e-4 the final-epoch
+metric favours B1 by 0.86 pp while best-checkpoint is a tie
+(0.9499 / 0.9500 / 0.9505). The defensible claim is **stop-point robustness**,
+not a better optimum.
+
 ## Rest of the plan
 
 **E3a — constant-LR sweep.** Real arm not implemented yet. LRs
