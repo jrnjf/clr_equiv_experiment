@@ -1,1403 +1,452 @@
-diff --git a/README.md b/README.md
-index 8d88fc5..45e19d7 100644
---- a/README.md
-+++ b/README.md
-@@ -182,6 +182,11 @@ arms sit at peak 0.8 / mean 0.44, so constant-LR controls (mean-matched 0.440,
- RMS-matched 0.487) are still required before claiming oscillation matters rather
- than a large average LR.
- 
-+## Performance
-+
-+`log_every` gates all per-step metric computation (not just the CSV write).
-+See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for why per-step logging cost ~2x.
-+
- ## Layout
- 
- ```
 diff --git a/docs/EXPERIMENT_PLAN.md b/docs/EXPERIMENT_PLAN.md
-new file mode 100644
-index 0000000..35824af
---- /dev/null
+index 35824af..fb69eb5 100644
+--- a/docs/EXPERIMENT_PLAN.md
 +++ b/docs/EXPERIMENT_PLAN.md
-@@ -0,0 +1,90 @@
-+# Experiment plan after E1
-+
-+E1 (implementation equivalence) is **complete** and is a decision helper, not a
-+paper result. Outcome: `A_internal` == `B1_external` (relative 6e-6 float32,
-+6e-16 float64), and the scheduler adds no measurable optimizer overhead
-+(40.2 ms vs 42.0 ms/step). Decision: **isolate the scheduler** — use stock
-+`SGD` + `ExternalDualScheduler`.
-+
-+Open decision E1 did not settle: which **weight-decay convention** to use.
-+
-+## E2 — does the coupled weight decay matter (the ablation you asked for)
-+
-+Three conventions, differing only in what multiplies the decay:
-+
-+| arm | convention | per-step shrink |
-+|---|---|---|
-+| `B1_external_wd_eff` | `wd * lr_effective` (oscillating, annealed) | `wd * 0.2002` mean |
-+| `B2_external_wd_base` | `wd * lr_base` (constant lr_max) | `wd * 0.8` |
-+| `F_external_wd_none` | `wd` (no LR scaling) | `wd * 1.0` |
-+
-+### The trap: equal coefficients are NOT equal decay
-+
-+At `weight_decay = 5e-4` over a 200-epoch run (78,000 steps), cumulative shrink:
-+
-+| convention | cumulative | vs effective |
-+|---|---|---|
-+| effective | 7.81 | 1x |
-+| base | 31.24 | **4.0x** |
-+| none | 39.00 | **5.0x** |
-+
-+Run all three at 5e-4 and the "winner" is whichever decays least — a magnitude
-+result, not a mechanism result.
-+
-+### Matched design
-+
-+`weight_decay` in the config is the **effective** coefficient. The others are
-+rescaled by `schedules.matched_weight_decays` so mean per-step shrink matches:
-+
-+| arm | weight_decay used | mean shrink/step |
-+|---|---|---|
-+| B1 effective | 5.0e-4 | 1.001e-4 |
-+| B2 base | **1.251e-4** | 1.001e-4 |
-+| F none | **1.001e-4** | 1.001e-4 |
-+
-+Now the only difference is **constant vs pulsing decay** — the mechanism.
-+
-+Verified: all three give cumulative shrink 7.8086 and final decay-only weight
-+0.00041 (identical). Tests in `tests/test_schedule_math.py::TestWeightDecayModes`.
-+
-+> Caveat: matching holds over the **whole run**. Epoch 0 sits at ~2x the
-+> run-average effective LR (cosine not yet annealed), so a single early epoch
-+> shows "effective" decaying harder. Don't judge from one epoch.
-+
-+## Rest of the plan
-+
-+**E3a — constant-LR sweep.** Real arm not implemented yet. LRs
-+{0.05, 0.10, **0.200**, **0.283**, 0.40, 0.80}. Gives the mean-matched and
-+RMS-matched controls that decide "oscillation vs lower average LR", plus the
-+divergence threshold at 0.8.
-+
-+**E3b — AdamW + cosine.** Not implemented. Required to test the headline claim;
-+must run in *this* harness, not borrowed from the sgd_jumper CSV.
-+
-+**E3c — tuned SGD + cosine.** Configs exist (`tt90_sgd_lr01` lr 0.1,
-+`tt90_sgd_lr02` lr 0.2, momentum 0.9). Tests whether the benchmark's
-+101-epoch-to-90% baseline was undertuned. Unify batch size with E1 (128,
-+390 steps) before comparing triangular arms.
-+
-+**E4 — seeds 3 -> 5** for final numbers. At n=3 the schedule-vs-cosine
-+difference in E1 was t=-1.84, i.e. underpowered.
-+
-+## Dropped (your decisions)
-+
-+* period sweep (`{1,2,4,8,16}` epochs)
-+* amplitude sweep (amplitude changes only via annealing)
-+* shape sweep (linear vs cosine)
-+
-+## Budget
-+
-+200 epochs at ~17 s/epoch (after the persistent-worker fix) is ~0.95 h/run.
-+
-+| | runs | time |
-+|---|---|---|
-+| E2 wd ablation: B2 + F, 3 seeds (B1 already run) | 6 | ~6 h |
-+| E3a constant sweep, 6 LRs x 3 seeds | 18 | ~17 h |
-+| E3b AdamW x 3 | 3 | ~3 h |
-+| E3c two SGD+cosine x 3 | 6 | ~6 h |
-+
-+Order: **E2 first** (cheap, 6 h, and it decides what the method arm should be),
-+then E3a (the central confound), then E3b/E3c.
-diff --git a/docs/PERFORMANCE.md b/docs/PERFORMANCE.md
-new file mode 100644
-index 0000000..d624e1a
---- /dev/null
-+++ b/docs/PERFORMANCE.md
-@@ -0,0 +1,94 @@
-+# Why the trainer was ~2x slower than jumper_experiment
-+
-+**Resolved.** The cause was not logging and not the optimizer. It was
-+**DataLoader worker respawn charged to every epoch**, plus an expensive
-+per-epoch evaluation.
-+
-+Numbers from the GPU box (NVIDIA RTX A4000, torch 2.14.1+cu130), batch 128,
-+390 steps/epoch, `scripts/profile_step.py`:
-+
-+| segment | measured |
-+|---|---|
-+| DataLoader only (over a 40-batch window) | 264.5 ms/batch |
-+| device copy | 0.5 ms |
-+| forward | 12.0 ms |
-+| **forward + backward** | **39.3 ms** |
-+| + stock SGD step | 42.0 ms |
-+| + scheduler prep/advance | 40.2 ms (scheduler overhead: none) |
-+| **epoch evaluation** | **10,655 ms** |
-+
-+## The account closes
-+
-+A 36.7 s epoch decomposes as:
-+
-+| | time |
-+|---|---|
-+| 390 steps x 40.2 ms | 15.7 s |
-+| epoch evaluation | ~10.7 s |
-+| DataLoader worker startup for the train pass | ~10.3 s |
-+| **total** | **~36.7 s** |
-+
-+So **~21 s of every 36.7 s epoch was not training at all.** The actual compute
-+(40.2 ms/step) already matches the benchmark's ~45 ms/step — our loop was never
-+slow.
-+
-+## Root cause: `persistent_workers=False`
-+
-+By default, every `for batch in loader` creates a **new iterator, which spawns a
-+fresh worker pool**. The training loop iterates the loader once per epoch, so the
-+pool is rebuilt 200 times; the evaluation loop does the same. With
-+`num_workers=4` that startup cost is charged to every epoch, twice (train and
-+eval).
-+
-+Measured directly (fake dataset, CPU, 40 batches/pass, same loader iterated 3x):
-+
-+| config | pass 1 | pass 2 | pass 3 |
-+|---|---|---|---|
-+| workers=4, persistent=False | 1.42 s | 0.21 s | 0.20 s |
-+| workers=4, persistent=True | 0.19 s | **0.07 s** | 0.07 s |
-+| workers=0 | 0.03 s | 0.03 s | 0.03 s |
-+
-+The 1.2 s gap is pure worker spawn — and that is on a trivial in-memory dataset.
-+With real augmentation and a larger dataset the same effect is what produced the
-+264 ms/batch and the 10.7 s evaluation.
-+
-+**Caveat on the 264 ms figure:** it is inflated. The profiler measured a 40-batch
-+window, so process startup dominated it; steady-state loading is far cheaper. It
-+is still the right diagnostic, because the training loop pays that startup once
-+per epoch.
-+
-+## Fixes
-+
-+1. `persistent_workers=True` on the train and eval loaders (spawn once, reuse).
-+2. Eval batch size 512 -> 1024 (fewer batches, same result).
-+3. `torch.backends.cudnn.benchmark = True` — fixed 32x32 input shapes, so cuDNN
-+   autotuning picks faster conv algorithms for free.
-+
-+Expected: ~36.7 s/epoch -> **~16-18 s/epoch**, i.e. a 200-epoch run in ~1 h
-+instead of 2.3 h. That also means the earlier E1 results (2.4 h/run) were
-+obtained with this overhead present; the *accuracy numbers are unaffected*, only
-+the wall-clock and `wall_to_90` figures are inflated.
-+
-+## Corrections to earlier claims in this file
-+
-+Two hypotheses were tested and **rejected**:
-+
-+* "Per-step synchronisation is the ~2x bottleneck." **No.** `log_every=1` costs
-+  11% (105.1 vs 94.1 ms/step); `log_every=10` costs 2%.
-+* "The optimizer or loop structure is slower than theirs." **No.** Forward +
-+  backward is 39.3 ms and the scheduler adds ~0 ms; arm A was measured *faster*
-+  than their Jumper loop on CPU (0.49 vs 0.53 ms/step).
-+
-+The gating fix from the first hypothesis is still retained: it is correct, it
-+removes an O(parameters) sync per step, and it makes `log_every` behave as
-+documented. It is just worth ~10%, not 2x.
-+
-+## How to verify
-+
-+```bash
-+python scripts/profile_step.py --config configs/cifar.json
-+```
-+
-+With the fix, `DataLoader only` should drop to the steady-state cost and
-+`epoch eval` from ~10.7 s to well under 1 s. The reconciliation line should then
-+match a real epoch.
-diff --git a/docs/RESULTS_E1.md b/docs/RESULTS_E1.md
-index f08b5f4..b932c4e 100644
---- a/docs/RESULTS_E1.md
-+++ b/docs/RESULTS_E1.md
-@@ -1,3 +1,7 @@
-+> **SUPERSEDED by [RESULTS_E1_200ep.md](RESULTS_E1_200ep.md).** This file
-+> documents the 30-epoch / 5k-holdout / CPU run, which used a different
-+> annealing horizon and is not comparable to the final results.
-+
- # E1 results — implementation equivalence, and what the CIFAR run shows
+@@ -51,6 +51,51 @@ Verified: all three give cumulative shrink 7.8086 and final decay-only weight
+ > run-average effective LR (cosine not yet annealed), so a single early epoch
+ > shows "effective" decaying harder. Don't judge from one epoch.
  
- Run from the pulled repo: 3 seeds, CIFAR-10 / ResNet-18 / 30 epochs / batch 250
++## E2 — weight-decay convention (simple version)
++
++One literal `weight_decay` from the config, applied to all three arms. They differ
++only in **what the coefficient multiplies**:
++
++| arm | decay factor | profile |
++|---|---|---|
++| `B1_external_wd_eff` | `triangle(step) * cosine(epoch)` | oscillating **and** annealed |
++| `B2_external_wd_base` | `lr_max * cosine(epoch)` | smooth **and** annealed |
++| `F_external_wd_none` | `1.0` | no LR scaling |
++
++At `weight_decay = 5e-4` the mean per-step shrink is therefore **1.0e-4 / 2.0e-4 /
++5.0e-4** — the conventions are 1x / 2x / 5x different in strength. That is
++accepted deliberately: this is the literal "set weight_decay=5e-4 and see what
++each convention does" comparison.
++
++An automatic strength-matching layer (rescaled coefficients, `target_mean_shrink`)
++was built and then removed as over-engineering. It is in git history if ever
++needed.
++
++### Fixed: `base` ignored the cosine
++
++`base` used to multiply by a **constant** `lr_max`, dropping the annealing
++entirely. That made it a plain constant multiply, so at matched strength it was
++identical to `none` — which is why the first pilot reported 0.9406 twice with
++wnorm 6.54 vs 6.52. Now `base` decays against `lr_max * cosine(epoch)`, from
++1.0e-3 per step at epoch 0 down to 1.6e-7 at epoch 199. Regression test:
++`tests/test_schedule_math.py::TestWeightDecayModes`.
++
++### Pilot at weight_decay = 5e-4, seed 0 (B1 valid; B2/F invalid — they ran the bug)
++
++| arm | peak acc | @ep | first 90 | wnorm@50 | wnorm@200 | final |
++|---|---|---|---|---|---|---|
++| B1 effective | 0.9499 | 181 | 16 | 38.9 | 24.2 | 0.9492 |
++| B2 base (buggy, = none) | 0.9500 | 189 | 17 | 48.8 | 6.5 | 0.9406 |
++| F none | 0.9505 | 186 | 17 | 48.8 | 6.5 | 0.9406 |
++
++B1 is still valid. **B2 and F must be re-run** with the annealing fix.
++
++What the valid comparisons showed: peak accuracy and time-to-90 were
++indistinguishable across all three; only the tail differed. Constant decay kept
++shrinking after the LR annealed to ~1e-7, collapsing weights 110 -> 6.5 and
++costing ~1 pp at the last epoch. That is why final-epoch and best-checkpoint
++accuracy disagree, and both must be reported.
++
+ ## Rest of the plan
+ 
+ **E3a — constant-LR sweep.** Real arm not implemented yet. LRs
 diff --git a/experiments/run_equivalence.py b/experiments/run_equivalence.py
-index 5acdcc2..27f5360 100644
+index 27f5360..be4940c 100644
 --- a/experiments/run_equivalence.py
 +++ b/experiments/run_equivalence.py
-@@ -58,7 +58,8 @@ from dual_scheduler import (assert_same_lr_series, build_external,
-                             build_internal, train_step)
- from schedules import effective_lr_series
- 
--ARMS = ("A_internal", "B1_external_wd_eff", "B2_external_wd_base", "C_cosine_only")
-+ARMS = ("A_internal", "B1_external_wd_eff", "B2_external_wd_base",
-+        "F_external_wd_none", "C_cosine_only")
- 
- DEFAULTS = {
-     "backend": "tiny",
-@@ -93,7 +94,23 @@ def load_config(path):
+@@ -94,27 +94,20 @@ def load_config(path):
      return cfg
  
  
-+def wd_for_arm(cfg, spe):
-+    """Weight-decay coefficient per convention, matched on mean shrink.
-+
-+    `weight_decay` in the config is the coefficient for the *effective* (method)
-+    convention. The "base" and "none" conventions are rescaled so their mean
-+    per-step shrink matches, otherwise they would be 4x and 5x stronger and the
-+    comparison would measure magnitude rather than distribution.
-+    """
-+    from schedules import matched_weight_decays
-+    m = matched_weight_decays(cfg["weight_decay"], spe, cfg["lr_max"],
-+                              cfg["lr_SWR"], cfg["epochs"],
-+                              cfg["global_schedule"], cfg["end_ratio"])
-+    return m
-+
-+
+-def wd_for_arm(cfg, spe):
+-    """Weight-decay coefficient per convention, matched on mean shrink.
+-
+-    `weight_decay` in the config is the coefficient for the *effective* (method)
+-    convention. The "base" and "none" conventions are rescaled so their mean
+-    per-step shrink matches, otherwise they would be 4x and 5x stronger and the
+-    comparison would measure magnitude rather than distribution.
+-    """
+-    from schedules import matched_weight_decays
+-    m = matched_weight_decays(cfg["weight_decay"], spe, cfg["lr_max"],
+-                              cfg["lr_SWR"], cfg["epochs"],
+-                              cfg["global_schedule"], cfg["end_ratio"])
+-    return m
+-
+-
  def make_opt_builder(cfg, spe, arm):
-+    m = wd_for_arm(cfg, spe)
+-    m = wd_for_arm(cfg, spe)
++    # Every arm gets the SAME literal weight_decay from the config. The arms
++    # differ only in what that coefficient is multiplied by:
++    #     B1 effective : wd * triangle(step) * cosine(epoch)
++    #     B2 base      : wd * lr_max * cosine(epoch)
++    #     F  none      : wd
++    # They therefore have different MEAN decay strengths. That is accepted
++    # deliberately: it is the literal "what happens if you set weight_decay=X"
++    # comparison. (An automatic strength-matching layer was tried and removed as
++    # over-engineering; see git history if it is ever wanted again.)
      common = dict(steps_per_epoch=spe, lr_max=cfg["lr_max"],
                    lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
                    total_epochs=cfg["epochs"], end_ratio=cfg["end_ratio"],
-@@ -106,7 +123,11 @@ def make_opt_builder(cfg, spe, arm):
+-                  weight_decay=cfg["weight_decay"],
++                  weight_decay=float(cfg["weight_decay"]),
+                   momentum=cfg.get("momentum", 0.0))
+ 
+     def build(model):
+@@ -123,11 +116,9 @@ def make_opt_builder(cfg, spe, arm):
          if arm == "B1_external_wd_eff":
              return build_external(model, wd_on_effective_lr=True, **common)
          if arm == "B2_external_wd_base":
--            return build_external(model, wd_on_effective_lr=False, **common)
-+            c = dict(common); c["weight_decay"] = m["base"]
-+            return build_external(model, wd_mode="base", **c)
-+        if arm == "F_external_wd_none":
-+            c = dict(common); c["weight_decay"] = m["none"]
-+            return build_external(model, wd_mode="none", **c)
+-            c = dict(common); c["weight_decay"] = m["base"]
+-            return build_external(model, wd_mode="base", **c)
++            return build_external(model, wd_mode="base", **common)
+         if arm == "F_external_wd_none":
+-            c = dict(common); c["weight_decay"] = m["none"]
+-            return build_external(model, wd_mode="none", **c)
++            return build_external(model, wd_mode="none", **common)
          if arm == "C_cosine_only":
              c = dict(common)
              c["lr_SWR"] = 1.0          # min == max -> no triangular component
-@@ -222,12 +243,20 @@ def main(argv=None):
-     ap.add_argument("--dry-run", action="store_true")
-     ap.add_argument("--check-equivalence", action="store_true")
-     ap.add_argument("--arms", nargs="*", default=list(ARMS))
-+    ap.add_argument("--out-dir", default=None,
-+                    help="override cfg['out_dir'] (keeps runs separated)")
-+    ap.add_argument("--seeds", nargs="*", type=int, default=None,
-+                    help="override cfg['seeds'] (e.g. --seeds 0 for a pilot)")
-     ap.add_argument("--allow-odd", action="store_true",
-                     help="permit an odd steps_per_epoch (peak is then slightly "
-                          "undersampled); use when replicating a fixed protocol")
-     args = ap.parse_args(argv)
- 
-     cfg = load_config(args.config)
-+    if args.out_dir:
-+        cfg["out_dir"] = args.out_dir
-+    if args.seeds is not None:
-+        cfg["seeds"] = args.seeds
- 
-     if args.dry_run:
-         return dry_run(cfg, allow_odd=args.allow_odd)
-@@ -258,11 +287,25 @@ def main(argv=None):
-                 device=cfg["device"], log_every=cfg["log_every"],
-                 out_dir=cfg["out_dir"], seed=seed))
- 
-+    os.makedirs(cfg["out_dir"], exist_ok=True)
-+    # MERGE with any existing summary rather than overwrite: runs are launched
-+    # in several batches (different arms, different seeds), and clobbering the
-+    # file would silently discard earlier results.
-     os.makedirs(cfg["out_dir"], exist_ok=True)
-     out = os.path.join(cfg["out_dir"], f"e1_summary_{cfg['backend']}.json")
-+    merged = {}
-+    if os.path.exists(out):
-+        try:
-+            for r in json.load(open(out)):
-+                merged[(r.get("arm"), r.get("seed"))] = r
-+        except (json.JSONDecodeError, TypeError):
-+            print(f"warning: {out} unreadable, starting a fresh summary")
-+    for r in results:
-+        merged[(r.get("arm"), r.get("seed"))] = r
-     with open(out, "w") as fh:
--        json.dump(results, fh, indent=2)
--    print(f"\nwrote {out}")
-+        json.dump(list(merged.values()), fh, indent=2)
-+    print(f"\nwrote {out} ({len(merged)} runs total, "
-+          f"{len(results)} from this invocation)")
-     return 0
- 
- 
-diff --git a/scripts/ab_loops.py b/scripts/ab_loops.py
+diff --git a/scripts/summarize_e2.py b/scripts/summarize_e2.py
 new file mode 100644
-index 0000000..a8d46cb
+index 0000000..c719b87
 --- /dev/null
-+++ b/scripts/ab_loops.py
-@@ -0,0 +1,180 @@
++++ b/scripts/summarize_e2.py
+@@ -0,0 +1,138 @@
 +#!/usr/bin/env python3
 +"""
-+A/B the training loop against the sgd_jumper reference on the SAME machine.
++Summarise an E2 run directory: the table we need to interpret the weight-decay
++ablation.
 +
-+The 200-epoch E1 run measured 94.5 ms/step with logging fully disabled, versus
-+~45 ms/step implied by the sgd_jumper benchmark CSV. Both are claimed to be the
-+same machine, so this script isolates the difference:
++    python scripts/summarize_e2.py results_e2 --config configs/cifar.json
 +
-+  A  our loop        stock SGD + ExternalDualScheduler (what E1/E2 use)
-+  B  their loop      Jumper optimizer, exactly as jumper_expirement.py builds it
-+  C  bare loop       stock SGD, no scheduler at all  (the compute floor)
++Columns
++    wd          literal weight_decay from the config (same for every arm)
++    mean shr    mean per-step decay shrink, which differs per convention
++    peak acc    best validation accuracy over the run, with its epoch
++    first 90    first epoch reaching 90%
++    final       accuracy at the last epoch
++    drop        peak - final  (positive = degraded after its best epoch)
++    loss        final validation loss
++    wnorm       mean weight norm at epoch 50 and at the final epoch
 +
-+All three run on the SAME model instance, the SAME prefetched batches, and the
-+SAME device, so data loading and model construction are excluded. A second pass
-+times the real DataLoader to show the data cost separately.
-+
-+Run on the GPU box:
-+    python scripts/ab_loops.py --config configs/cifar.json --batches 30
++`peak acc` and `final` disagree when a run collapses late, which is the whole
++point of this ablation -- report both.
 +"""
-+import argparse, json, os, sys, time
-+
-+HERE = os.path.dirname(os.path.abspath(__file__))
-+ROOT = os.path.dirname(HERE)
-+sys.path.insert(0, os.path.join(ROOT, "src"))
-+
-+REF = os.path.join(os.path.dirname(ROOT), ".sgd_jumper_ref")
-+
-+
-+def sync():
-+    import torch
-+    if torch.cuda.is_available():
-+        torch.cuda.synchronize()
-+
-+
-+def timeit(fn, n):
-+    fn(); sync()
-+    t0 = time.perf_counter()
-+    for _ in range(n):
-+        fn()
-+    sync()
-+    return (time.perf_counter() - t0) / n * 1000
-+
-+
-+def main():
-+    ap = argparse.ArgumentParser()
-+    ap.add_argument("--config", default="configs/cifar.json")
-+    ap.add_argument("--batches", type=int, default=30)
-+    a = ap.parse_args()
-+
-+    import torch
-+    from backends import build as build_backend
-+    from dual_scheduler import build_external
-+
-+    cfg = json.load(open(os.path.join(ROOT, a.config)))
-+    device = cfg.get("device", "cuda")
-+
-+    print(f"torch {torch.__version__} | cuda {torch.version.cuda} | "
-+          f"cudnn.benchmark={torch.backends.cudnn.benchmark} | "
-+          f"cudnn.allow_tf32={torch.backends.cudnn.allow_tf32}")
-+    if torch.cuda.is_available():
-+        print(f"GPU: {torch.cuda.get_device_name(0)} "
-+              f"({torch.cuda.get_device_properties(0).total_memory/1e9:.1f} GB)")
-+    else:
-+        print("CUDA unavailable -> timings will not reflect GPU behaviour")
-+
-+    train_loader, _v, _t, make_model, eval_fn, spe = build_backend(cfg)
-+    crit = torch.nn.CrossEntropyLoss()
-+
-+    # --- model once, shared by all arms
-+    torch.manual_seed(0)
-+    model = make_model().to(device)
-+
-+    # --- prefetch batches so data loading is excluded from loop timing
-+    batches = []
-+    for x, y in train_loader:
-+        batches.append((x.to(device, non_blocking=True),
-+                        y.to(device, non_blocking=True)))
-+        if len(batches) >= a.batches:
-+            break
-+    print(f"device={device} batch={cfg['batch_size']} steps/epoch={spe} "
-+          f"batches timed={len(batches)}\n")
-+
-+    # --- A: our loop
-+    opt_a, sch_a = build_external(
-+        model, steps_per_epoch=spe, lr_max=cfg["lr_max"], lr_SWR=cfg["lr_SWR"],
-+        global_name=cfg["global_schedule"], total_epochs=cfg["epochs"],
-+        end_ratio=cfg["end_ratio"], weight_decay=cfg["weight_decay"],
-+        wd_on_effective_lr=True, momentum=cfg.get("momentum", 0.0))
-+
-+    def loop_a():
-+        for x, y in batches:
-+            opt_a.zero_grad(set_to_none=True)
-+            loss = crit(model(x), y)
-+            loss.backward()
-+            sch_a.prep()
-+            opt_a.step()
-+            sch_a.advance()
-+    ms_a = timeit(loop_a, 3) / len(batches)
-+
-+    # --- C: bare stock SGD, no scheduler
-+    opt_c = torch.optim.SGD(model.parameters(),
-+                            lr=cfg["lr_max"] / cfg["lr_SWR"],
-+                            momentum=cfg.get("momentum", 0.0))
-+
-+    def loop_c():
-+        for x, y in batches:
-+            opt_c.zero_grad(set_to_none=True)
-+            loss = crit(model(x), y)
-+            loss.backward()
-+            opt_c.step()
-+    ms_c = timeit(loop_c, 3) / len(batches)
-+
-+    # --- B: their Jumper, exactly as their benchmark builds it
-+    ms_b = None
-+    if os.path.isdir(REF):
-+        sys.path.insert(0, REF)
-+        try:
-+            from sgd_jumper import Jumper
-+            opt_b = Jumper(model.parameters(), steps_per_epoch=spe, lr=0.8,
-+                           gamma=20.0, fit_type="log", lr_SWR=10,
-+                           momentum=0.0, weight_decay=5e-4)
-+
-+            def loop_b():
-+                for x, y in batches:
-+                    opt_b.zero_grad()
-+                    loss = crit(model(x), y)
-+                    loss.backward()
-+                    opt_b.step()
-+            ms_b = timeit(loop_b, 3) / len(batches)
-+        except Exception as e:            # noqa: BLE001
-+            print(f"could not import their Jumper: {e}")
-+    else:
-+        print(f"note: {REF} not found; skipping arm B")
-+
-+    # --- their loop but with stock SGD (isolates optimizer from loop style)
-+    opt_d = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9,
-+                            weight_decay=5e-4)
-+
-+    def loop_d():
-+        for x, y in batches:
-+            opt_d.zero_grad()             # their zero_grad style, not set_to_none
-+            loss = crit(model(x), y)
-+            loss.backward()
-+            opt_d.step()
-+    ms_d = timeit(loop_d, 3) / len(batches)
-+
-+    print(f"{'arm':<46}{'ms/step':>10}")
-+    print(f"{'A  our loop (SGD + external scheduler)':<46}{ms_a:>10.2f}")
-+    if ms_b is not None:
-+        print(f"{'B  their loop (Jumper)':<46}{ms_b:>10.2f}")
-+    print(f"{'C  bare loop (stock SGD, no scheduler)':<46}{ms_c:>10.2f}")
-+    print(f"{'D  their loop style + stock SGD(m=0.9,lr=.1)':<46}{ms_d:>10.2f}")
-+    print(f"\nA/C ratio (our overhead over compute floor): {ms_a/ms_c:.2f}x")
-+    if ms_b is not None:
-+        print(f"A/B ratio (ours vs theirs):                  {ms_a/ms_b:.2f}x")
-+        print(f"B/C ratio (their optimizer over floor):      {ms_b/ms_c:.2f}x")
-+    print(f"evaluation per epoch: {timeit(lambda: eval_fn(model, None), 2):.0f} ms")
-+
-+    # --- data loading alone: iterate the real loader, no compute at all.
-+    # The A/B above prefetches batches, so it cannot see a loader bottleneck.
-+    def data_pass():
-+        n = 0
-+        for x, y in train_loader:
-+            x.to(device, non_blocking=True)
-+            y.to(device, non_blocking=True)
-+            n += 1
-+            if n >= len(batches):
-+                break
-+    ms_data = timeit(data_pass, 2) / len(batches)
-+    print(f"\ndata loading alone: {ms_data:.2f} ms/batch "
-+          f"(num_workers={cfg.get('num_workers')})")
-+    print(f"  as a share of arm A: {ms_data / ms_a * 100:.0f}%")
-+    if ms_data > 0.5 * ms_a:
-+        print("  >> the loader alone costs more than half of a training step; "
-+              "try --num-workers 0/2/8 to see if it is the bottleneck")
-+    return 0
-+
-+
-+if __name__ == "__main__":
-+    sys.exit(main())
-diff --git a/scripts/bench_logging.py b/scripts/bench_logging.py
-new file mode 100644
-index 0000000..f79866d
---- /dev/null
-+++ b/scripts/bench_logging.py
-@@ -0,0 +1,91 @@
-+#!/usr/bin/env python3
-+"""
-+Measure the per-step cost of logging, on the real device.
-+
-+The trainer's per-step metrics force CUDA synchronisation: every float()/.item()
-+on a GPU tensor blocks until the queue drains. `log_every` now gates the whole
-+computation, so this script quantifies what that buys on your hardware.
-+
-+Run on the GPU box:
-+    python scripts/bench_logging.py --config configs/cifar.json
-+    python scripts/bench_logging.py --config configs/tiny.json      # CPU sanity
-+
-+Output: ms/step for several log_every values. A huge log_every effectively logs
-+nothing, so its number is the "pure training step" cost and the difference is the
-+logging overhead.
-+
-+Note: this trains a few real epochs, so on CIFAR it takes ~4 epochs of GPU time
-+(and downloads CIFAR-10 on first run).
-+"""
-+import argparse, json, os, sys, tempfile
++import argparse, csv, glob, json, os, statistics as st, sys
 +
 +sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 +
-+from backends import build as build_backend
-+from trainer import run_arm
++MODES = {
++    "B1_external_wd_eff": "triangle*cosine",
++    "B2_external_wd_base": "lr_max*cosine",
++    "F_external_wd_none": "1.0",
++    "A_internal": "triangle*cosine",
++    "C_cosine_only": "l cosine (no triangle)",
++}
 +
-+DEFAULTS = dict(lr_max=0.8, lr_SWR=1000.0, weight_decay=5e-4,
-+                global_schedule="cosine", end_ratio=1e-4, device="cuda",
-+                num_workers=4, batch_size=128, data_root="./data")
++
++def mean_shrink(wd, cfg, mode):
++    """Mean per-step decay multiplier for this convention."""
++    from schedules import mean_effective_lr
++    spe = int(cfg["batch_size"]) and 50000 // int(cfg["batch_size"])  # nominal
++    T = cfg["epochs"]
++    lr_max, swr = cfg["lr_max"], cfg["lr_SWR"]
++    g, end = cfg.get("global_schedule", "cosine"), cfg.get("end_ratio", 1e-4)
++    if mode == "triangle*cosine":
++        return wd * mean_effective_lr(spe, lr_max, swr, T, g, end)
++    if mode == "lr_max*cosine":
++        return wd * mean_effective_lr(spe, lr_max, 1.0, T, g, end)
++    return wd * 1.0
 +
 +
-+def make_builder(cfg, spe):
-+    from dual_scheduler import build_external
-+    return lambda model: build_external(
-+        model, steps_per_epoch=spe, lr_max=cfg["lr_max"], lr_SWR=cfg["lr_SWR"],
-+        global_name=cfg["global_schedule"], total_epochs=cfg["epochs"],
-+        end_ratio=cfg["end_ratio"], weight_decay=cfg["weight_decay"],
-+        wd_on_effective_lr=True, momentum=cfg.get("momentum", 0.0))
++def load_runs(d):
++    runs = []
++    for p in glob.glob(os.path.join(d, "*.json")):
++        if os.path.basename(p).startswith("e1_summary"):
++            try:
++                runs.extend(json.load(open(p)))
++                continue
++            except Exception:
++                pass
++        try:
++            x = json.load(open(p))
++            if isinstance(x, dict) and "arm" in x and "val_history" in x:
++                runs.append(x)
++        except Exception:
++            pass
++    # dedupe by (arm, seed), preferring the summary file's copy
++    uniq = {}
++    for r in runs:
++        uniq[(r["arm"], r["seed"])] = r
++    return list(uniq.values())
++
++
++def weight_norms(csv_path):
++    """Per-epoch mean weight norm, keyed 1-based to match val_history."""
++    if not os.path.exists(csv_path):
++        return {}
++    acc = {}
++    for row in csv.DictReader(open(csv_path)):
++        try:
++            acc.setdefault(int(row["epoch"]) + 1, []).append(float(row["weight_norm"]))
++        except (KeyError, ValueError):
++            continue
++    return {e: st.mean(v) for e, v in acc.items()}
 +
 +
 +def main():
 +    ap = argparse.ArgumentParser()
++    ap.add_argument("dir", nargs="?", default="results_e2")
 +    ap.add_argument("--config", default="configs/cifar.json")
-+    ap.add_argument("--epochs", type=int, default=2,
-+                    help="epochs per setting (keep small)")
-+    ap.add_argument("--log-every", nargs="*", type=int, default=[1, 10, 50, 10**9])
 +    a = ap.parse_args()
 +
-+    cfg = dict(DEFAULTS)
-+    with open(a.config) as fh:
-+        cfg.update(json.load(fh))
-+    if cfg.get("device") == "cuda":
-+        import torch
-+        if not torch.cuda.is_available():
-+            print("CUDA unavailable -> running on CPU; sync costs will not show.")
-+            cfg["device"] = "cpu"
-+    cfg["epochs"] = a.epochs
-+
-+    train_loader, _v, _t, make_model, eval_fn, spe = build_backend(cfg)
-+    print(f"device={cfg['device']} batch={cfg['batch_size']} "
-+          f"steps/epoch={spe} epochs/setting={a.epochs}\n")
-+
-+    results = {}
-+    for le in a.log_every:
-+        label = "none" if le >= 10**8 else str(le)
-+        with tempfile.TemporaryDirectory() as td:
-+            s = run_arm(
-+                arm_name="bench", make_model=make_model,
-+                make_optimizer_and_scheduler=make_builder(cfg, spe),
-+                train_loader=train_loader, eval_fn=eval_fn,
-+                epochs=a.epochs, steps_per_epoch=spe, device=cfg["device"],
-+                log_every=le, out_dir=td, seed=0)
-+        results[label] = s
-+        print(f"  log_every={label:<6} {s['ms_per_step']:7.1f} ms/step  "
-+              f"({s['sec_per_epoch']:.1f} s/epoch)")
-+
-+    base = results.get("none", {}).get("ms_per_step")
-+    if base:
-+        print(f"\noverhead relative to no logging (baseline {base:.1f} ms/step):")
-+        for label, s in results.items():
-+            r = s["ms_per_step"] / base
-+            print(f"  log_every={label:<6} {r:5.2f}x  "
-+                  f"(+{s['ms_per_step'] - base:.1f} ms/step)")
-+        print("\nProjected 200-epoch run time at each setting:")
-+        for label, s in results.items():
-+            print(f"  log_every={label:<6} {s['sec_per_epoch'] * 200 / 3600:6.2f} h")
-+    return 0
-+
-+
-+if __name__ == "__main__":
-+    sys.exit(main())
-diff --git a/scripts/plot_e1.py b/scripts/plot_e1.py
-new file mode 100644
-index 0000000..ea8ec40
---- /dev/null
-+++ b/scripts/plot_e1.py
-@@ -0,0 +1,94 @@
-+#!/usr/bin/env python3
-+"""
-+Figure: validation accuracy vs epoch for the four E1 arms, plus time-to-90%.
-+
-+Reads results/e1_summary_cifar.json (the 200-epoch / 390-step / cuda run) and
-+writes docs/fig_e1_curves.png.
-+
-+Usage:
-+    MPLCONFIGDIR=/tmp/mpl python scripts/plot_e1.py
-+"""
-+import json, os, statistics as st
-+import matplotlib
-+matplotlib.use("Agg")
-+import matplotlib.pyplot as plt
-+
-+HERE = os.path.dirname(os.path.abspath(__file__))
-+ROOT = os.path.dirname(HERE)
-+SUM = os.path.join(ROOT, "results", "e1_summary_cifar.json")
-+OUT = os.path.join(ROOT, "docs", "fig_e1_curves.png")
-+
-+LABELS = {
-+    "A_internal": "A internal (tri x cosine)",
-+    "B1_external_wd_eff": "B1 external, wd on eff. LR",
-+    "B2_external_wd_base": "B2 external, wd on base LR",
-+    "C_cosine_only": "C cosine only (no triangle)",
-+}
-+COLORS = {
-+    "A_internal": "#1f77b4",
-+    "B1_external_wd_eff": "#2ca02c",
-+    "B2_external_wd_base": "#ff7f0e",
-+    "C_cosine_only": "#d62728",
-+}
-+ORDER = ["A_internal", "B1_external_wd_eff", "B2_external_wd_base", "C_cosine_only"]
-+
-+
-+def main():
-+    rows = json.load(open(SUM))
-+    arms = [a for a in ORDER if any(r["arm"] == a for r in rows)]
-+
-+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(11, 4.2),
-+                                  gridspec_kw={"width_ratios": [2.1, 1]})
-+
-+    for a in arms:
-+        runs = [r for r in rows if r["arm"] == a]
-+        # mean curve across seeds, aligned by epoch
-+        n = min(len(r["val_history"]) for r in runs)
-+        mean_curve = [st.mean(r["val_history"][e]["val_acc"] for r in runs)
-+                      for e in range(n)]
-+        ax.plot(range(1, n + 1), mean_curve, color=COLORS[a], lw=2, label=LABELS[a])
-+        # shade seed spread
-+        lo = [min(r["val_history"][e]["val_acc"] for r in runs) for e in range(n)]
-+        hi = [max(r["val_history"][e]["val_acc"] for r in runs) for e in range(n)]
-+        ax.fill_between(range(1, n + 1), lo, hi, color=COLORS[a], alpha=0.12, lw=0)
-+
-+    ax.axhline(0.90, ls="--", c="k", lw=1, alpha=0.55)
-+    ax.text(3, 0.904, "90% threshold", fontsize=9, alpha=0.8)
-+    ax.set_xscale("log")
-+    ax.set_xlim(1, 200)
-+    ax.set_ylim(0.25, 0.97)
-+    ax.set_xlabel("epoch (log scale)")
-+    ax.set_ylabel("test accuracy")
-+    ax.set_title("E1: triangular CLR vs cosine-only, CIFAR-10 / ResNet-18\n"
-+                 "200 epochs, batch 128 (390 steps/epoch), 3 seeds, mean $\\pm$ seed range")
-+    ax.legend(fontsize=8.5, loc="lower right")
-+    ax.grid(alpha=0.25)
-+
-+    # time-to-90% bars
-+    means, errs = [], []
-+    for a in arms:
-+        e = [next((h["epoch"] for h in r["val_history"] if h["val_acc"] >= 0.90), None)
-+             for r in rows if r["arm"] == a]
-+        vals = [x for x in e if x]
-+        means.append(st.mean(vals) if vals else 0)
-+        errs.append(st.stdev(vals) if len(vals) > 1 else 0)
-+    bars = ax2.barh(range(len(arms)), means, xerr=errs,
-+                    color=[COLORS[a] for a in arms], alpha=0.85)
-+    ax2.set_yticks(range(len(arms)))
-+    ax2.set_yticklabels([LABELS[a].split(" (")[0] for a in arms], fontsize=9)
-+    ax2.invert_yaxis()
-+    ax2.set_xlabel("epochs to 90% accuracy")
-+    ax2.set_title("time-to-competence")
-+    for i, (b, m) in enumerate(zip(bars, means)):
-+        if m:
-+            ax2.text(m + 2, i, f"{m:.0f}", va="center", fontsize=9)
-+    ax2.grid(alpha=0.25, axis="x")
-+
-+    fig.tight_layout()
-+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-+    fig.savefig(OUT, dpi=160)
-+    print("wrote", OUT)
-+
-+
-+if __name__ == "__main__":
-+    main()
-diff --git a/scripts/profile_step.py b/scripts/profile_step.py
-new file mode 100644
-index 0000000..0dc3fdb
---- /dev/null
-+++ b/scripts/profile_step.py
-@@ -0,0 +1,173 @@
-+#!/usr/bin/env python3
-+"""
-+Decompose per-step time so the real bottleneck can be identified.
-+
-+The logging fix turned out to be only ~11% of the gap (see docs/PERFORMANCE.md),
-+so this script measures the pieces separately:
-+
-+    data loading | forward | backward | optimizer step | epoch eval
-+
-+Run on the GPU box:
-+    python scripts/profile_step.py --config configs/cifar.json
-+    python scripts/profile_step.py --config configs/cifar.json --batches 60
-+
-+Every segment is wrapped in torch.cuda.synchronize() so the numbers are real
-+device time, not queue-submission time.
-+"""
-+import argparse, json, os, sys, time
-+
-+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-+
-+from backends import build as build_backend
-+from dual_scheduler import build_external
-+
-+
-+def sync():
-+    import torch
-+    if torch.cuda.is_available():
-+        torch.cuda.synchronize()
-+
-+
-+def timeit(fn, n):
-+    """Run fn once per iteration for n iterations; return ms/iteration."""
-+    fn()                       # warmup (allocators, cudnn autotune)
-+    sync()
-+    t0 = time.perf_counter()
-+    for _ in range(n):
-+        fn()
-+    sync()
-+    return (time.perf_counter() - t0) / n * 1000
-+
-+
-+def main():
-+    ap = argparse.ArgumentParser()
-+    ap.add_argument("--config", default="configs/cifar.json")
-+    ap.add_argument("--batches", type=int, default=40)
-+    a = ap.parse_args()
-+
-+    import torch
 +    cfg = json.load(open(a.config))
-+    if not torch.cuda.is_available():
-+        print("CUDA unavailable; timings will not reflect GPU behaviour.")
-+    train_loader, _v, _t, make_model, eval_fn, spe = build_backend(cfg)
-+    device = cfg.get("device", "cuda")
++    wd = float(cfg["weight_decay"])
++    runs = load_runs(a.dir)
++    if not runs:
++        print(f"no runs with val_history found in {a.dir}/")
++        print("expected e1_summary_*.json or <arm>_seed<N>.json there")
++        return 1
 +
-+    model = make_model().to(device)
-+    crit = torch.nn.CrossEntropyLoss()
-+    opt, sched = build_external(
-+        model, steps_per_epoch=spe, lr_max=cfg["lr_max"],
-+        lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
-+        total_epochs=cfg["epochs"], end_ratio=cfg["end_ratio"],
-+        weight_decay=cfg["weight_decay"],
-+        wd_on_effective_lr=True, momentum=cfg.get("momentum", 0.0))
++    print(f"dir={a.dir}  weight_decay={wd:g}  epochs={cfg['epochs']}")
++    print(f"{'arm':<24}{'mean shr':>10}{'peak':>8}{'@ep':>5}{'1st90':>7}"
++          f"{'final':>8}{'drop':>7}{'loss':>8}{'wn@50':>8}{'wn@end':>8}")
++    print("-" * 104)
 +
-+    batches = []
-+    for i, (x, y) in enumerate(train_loader):
-+        batches.append((x, y))
-+        if len(batches) >= a.batches:
-+            break
-+    print(f"torch {torch.__version__} | cuda {torch.version.cuda}")
-+    if torch.cuda.is_available():
-+        pr = torch.cuda.get_device_properties(0)
-+        print(f"GPU: {torch.cuda.get_device_name(0)} ({pr.total_memory/1e9:.1f} GB, "
-+              f"{pr.multi_processor_count} SMs)")
-+    print(f"device={device} batch={cfg['batch_size']} steps/epoch={spe} "
-+          f"measuring on {len(batches)} batches\n")
++    by_arm = {}
++    for r in sorted(runs, key=lambda x: (x["arm"], x["seed"])):
++        hist = r["val_history"]
++        accs = [h["val_acc"] for h in hist]
++        peak = max(accs)
++        pep = accs.index(peak) + 1
++        final = accs[-1]
++        first90 = next((h["epoch"] for h in hist if h["val_acc"] >= 0.90), None)
++        wn = weight_norms(os.path.join(a.dir, f"{r['arm']}_seed{r['seed']}.csv"))
++        w50 = wn.get(50)
++        wend = wn.get(len(hist))
++        mode = MODES.get(r["arm"], "?")
++        try:
++            shr = mean_shrink(wd, cfg, mode)
++        except Exception:
++            shr = float("nan")
++        by_arm.setdefault(r["arm"], []).append(
++            (peak, final, first90, w50, wend, r["final_val_loss"], shr))
++        print(f"{r['arm']+f' s{r['seed']}':<24}{shr:>10.2e}{peak:>8.4f}{pep:>5}"
++              f"{str(first90):>7}{final:>8.4f}{100*(peak-final):>+7.2f}"
++              f"{r['final_val_loss']:>8.4f}"
++              f"{(f'{w50:.1f}' if w50 else '-'):>8}"
++              f"{(f'{wend:.1f}' if wend else '-'):>8}")
 +
-+    # ---- 0. DataLoader alone: only next(), no .to(), no compute.
-+    # This is where waiting hides in the training loop: the `for ... in loader`
-+    # fetch sits outside every per-operation timer in an instrumented trainer.
-+    def loader_only():
-+        n = 0
-+        for _x, _y in train_loader:
-+            n += 1
-+            if n >= len(batches):
-+                break
-+    ms_loader = timeit(loader_only, 2) / len(batches)
-+
-+    # ---- 1. data only: pull tensors to device, no compute
-+    def data_only():
-+        for x, y in batches:
-+            x.to(device, non_blocking=True)
-+            y.to(device, non_blocking=True)
-+    ms_data = timeit(data_only, 3) / len(batches)
-+
-+    # ---- 2. forward only
-+    x0, y0 = batches[0][0].to(device), batches[0][1].to(device)
-+    model.eval()
-+    def fwd():
-+        with torch.no_grad():
-+            model(x0)
-+    ms_fwd = timeit(fwd, 10)
-+
-+    # ---- 3. forward + backward
-+    model.train()
-+    def fwd_bwd():
-+        opt.zero_grad(set_to_none=True)
-+        loss = crit(model(x0), y0)
-+        loss.backward()
-+    ms_fb = timeit(fwd_bwd, 10)
-+
-+    # ---- 4. + optimizer step (the arm under test)
-+    def full_step():
-+        opt.zero_grad(set_to_none=True)
-+        loss = crit(model(x0), y0)
-+        loss.backward()
-+        sched.prep()
-+        opt.step()
-+        sched.advance()
-+    ms_full = timeit(full_step, 10)
-+
-+    # ---- 5. same, but with a stock optimizer only (no scheduler calls)
-+    plain = torch.optim.SGD(model.parameters(), lr=cfg["lr_max"] / cfg["lr_SWR"],
-+                            momentum=cfg.get("momentum", 0.0))
-+    def full_step_plain():
-+        opt.zero_grad(set_to_none=True)
-+        loss = crit(model(x0), y0)
-+        loss.backward()
-+        plain.step()
-+    ms_plain = timeit(full_step_plain, 10)
-+
-+    # ---- 6. epoch evaluation
-+    def do_eval():
-+        eval_fn(model, None)
-+    ms_eval = timeit(do_eval, 2)
-+
-+    print(f"{'segment':<34}{'ms':>10}")
-+    print(f"{'DataLoader only (next())':<34}{ms_loader:>10.2f}")
-+    print(f"{'device copy (.to)':<34}{ms_data:>10.2f}")
-+    print(f"{'forward':<34}{ms_fwd:>10.2f}")
-+    print(f"{'forward + backward':<34}{ms_fb:>10.2f}")
-+    print(f"{'  (backward alone)':<34}{ms_fb - ms_fwd:>10.2f}")
-+    print(f"{'+ stock SGD step':<34}{ms_plain:>10.2f}")
-+    print(f"{'+ scheduler prep/advance':<34}{ms_full:>10.2f}")
-+    print(f"{'  (scheduler overhead)':<34}{ms_full - ms_plain:>10.2f}")
-+    print(f"{'epoch eval (whole split)':<34}{ms_eval:>10.2f}")
-+    print(f"\nprojected per epoch: "
-+          f"{(ms_full + ms_data) * spe / 1000 + ms_eval / 1000:.1f} s "
-+          f"({spe} steps + 1 eval)")
-+    print(f"  of which eval: {ms_eval / 1000:.1f} s")
-+    print(f"  of which steps: {(ms_full + ms_data) * spe / 1000:.1f} s")
-+
-+    # Reconciliation: sum of the measured segments vs a full epoch at that rate.
-+    measured = (ms_loader + ms_full) * spe / 1000 + ms_eval / 1000
-+    print(f"\nreconciliation: ({ms_loader:.1f} loader + {ms_full:.1f} step) x {spe} "
-+          f"+ {ms_eval:.0f} eval = {measured:.1f} s/epoch")
-+    print(f"  if the real epoch time is much larger, the gap is async submission "
-+          f"(these numbers are device-synchronised, so it should not be).")
-+
-+    if ms_loader > 0.5 * ms_full:
-+        print(f"\n>> DataLoader is the bottleneck: {ms_loader:.1f} ms/batch waited "
-+              f"for workers. Try --num-workers 0/2/8 and set "
-+              f"torch.backends.cudnn.benchmark=True.")
-+    if ms_data > 0.5 * (ms_fb + ms_data):
-+        print("\n>> data loading looks like a large share; check num_workers / "
-+              "CPU-side augmentation.")
-+    if ms_fb - ms_fwd < 0.2 * ms_fb:
-+        print("\n>> suspicious: backward much cheaper than expected; check that "
-+              "graphs are not being freed early.")
++    if any(len(v) > 1 for v in by_arm.values()):
++        print("\nper-arm mean over seeds:")
++        print(f"{'arm':<24}{'n':>3}{'peak':>8}{'final':>8}{'drop':>7}{'1st90':>7}")
++        for arm, rows in by_arm.items():
++            print(f"{arm:<24}{len(rows):>3}{st.mean(r[0] for r in rows):>8.4f}"
++                  f"{st.mean(r[1] for r in rows):>8.4f}"
++                  f"{st.mean(100*(r[0]-r[1]) for r in rows):>+7.2f}"
++                  f"{st.mean(r[2] for r in rows if r[2]):>7.1f}")
 +    return 0
 +
 +
 +if __name__ == "__main__":
 +    sys.exit(main())
-diff --git a/src/backends.py b/src/backends.py
-index 313949f..0fe95f0 100644
---- a/src/backends.py
-+++ b/src/backends.py
-@@ -129,11 +129,20 @@ def _build_cifar(cfg):
- 
-     bs = int(cfg["batch_size"])
-     nw = cfg.get("num_workers", 4)
-+    # persistent_workers=True: without it every `for ... in loader` spawns a
-+    # fresh worker pool, and that startup is charged to EVERY epoch. Measured
-+    # on the GPU box: DataLoader-only iteration cost 264 ms/batch over a 40-batch
-+    # window, which is ~10 s of process startup, and epoch evaluation measured
-+    # 10.7 s for 20 batches -- i.e. the eval "cost" was almost entirely worker
-+    # spawn. Together those two accounted for ~20 s of a 36.7 s epoch.
-+    pw = nw > 0
-     train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
--                              num_workers=nw, pin_memory=True, drop_last=True)
-+                              num_workers=nw, pin_memory=True, drop_last=True,
-+                              persistent_workers=pw)
-     # test set doubles as the evaluation set
--    eval_loader = DataLoader(test_set, batch_size=512, shuffle=False,
--                             num_workers=nw, pin_memory=True)
-+    eval_loader = DataLoader(test_set, batch_size=1024, shuffle=False,
-+                             num_workers=nw, pin_memory=True,
-+                             persistent_workers=pw)
- 
-     steps = len(train_loader)          # e.g. 50000/250 = 200
-     if steps % 2:
-@@ -206,10 +215,13 @@ def _build_cifar_bench(cfg):
-     bs = int(cfg["batch_size"])
-     nw = cfg.get("num_workers", 4)
-     # drop_last=True exactly as in jrnjf/sgd_jumper (50000/128 -> 390 steps)
-+    pw = nw > 0
-     train_loader = DataLoader(train_set, batch_size=bs, shuffle=True,
--                              num_workers=nw, pin_memory=True, drop_last=True)
--    val_loader = DataLoader(test_set, batch_size=512, shuffle=False,
--                            num_workers=nw, pin_memory=True)
-+                              num_workers=nw, pin_memory=True, drop_last=True,
-+                              persistent_workers=pw)
-+    val_loader = DataLoader(test_set, batch_size=1024, shuffle=False,
-+                            num_workers=nw, pin_memory=True,
-+                            persistent_workers=pw)
- 
-     steps = len(train_loader)
-     if steps % 2:
 diff --git a/src/dual_scheduler.py b/src/dual_scheduler.py
-index 8d464b3..9d79ba1 100644
+index 9d79ba1..b5ad232 100644
 --- a/src/dual_scheduler.py
 +++ b/src/dual_scheduler.py
-@@ -55,6 +55,17 @@ class ExternalDualScheduler:
-         self.global_fn = global_schedule(global_name, total_epochs, end_ratio)
-         self._step = 0
-         self.last_lr = None
-+        # Weight-decay mode. torch.optim.SGD can only decay against group['lr'],
-+        # which the scheduler overwrites with the effective LR every step. The
-+        # other two conventions therefore need the decay applied by hand:
-+        #   "effective" : let torch do it  -> w *= (1 - wd * lr_effective)
-+        #   "base"      : manual           -> w *= (1 - wd * lr_max)
-+        #   "none"      : manual           -> w *= (1 - wd)
-+        # "base" and "none" are constants, so their per-step shrink does NOT
-+        # anneal while "effective" does. Compare them at matched mean strength.
-+        self.wd_mode = "effective"
-+        self.manual_wd = 0.0
-+        self.manual_wd_factor = 1.0
- 
-     def lr_at(self, step: int) -> float:
-         c = step % self.steps_per_epoch
-@@ -75,6 +86,13 @@ class ExternalDualScheduler:
-         lr = self.lr_at(self._step)
+@@ -87,12 +87,25 @@ class ExternalDualScheduler:
          for group in self.opt.param_groups:
              group["lr"] = lr
-+        if self.manual_wd:
-+            # w <- w*(1 - wd*factor) BEFORE the gradient update, matching
-+            # torch.optim.SGD's ordering: w <- w*(1 - wd*lr) - lr*g
-+            with __import__("torch").no_grad():
-+                for group in self.opt.param_groups:
-+                    for p in group["params"]:
-+                        p.data.mul_(1.0 - self.manual_wd * self.manual_wd_factor)
+         if self.manual_wd:
++            # Decay factor per convention:
++            #   "base" : the ANNEALED base lr, i.e. lr_max * global(epoch) --
++            #            the peak of the triangle envelope at this step. Using a
++            #            constant lr_max here (an earlier bug) silently dropped
++            #            the cosine, which made "base" a plain constant multiply
++            #            and therefore identical to "none" once strength was
++            #            matched. That is why the pilot reported 0.9406 twice.
++            #   "none" : 1.0, no lr scaling at all.
++            if self.wd_mode == "base":
++                factor = self.lr_max * self.global_fn(
++                    self._step / float(self.steps_per_epoch))
++            else:
++                factor = 1.0
+             # w <- w*(1 - wd*factor) BEFORE the gradient update, matching
+             # torch.optim.SGD's ordering: w <- w*(1 - wd*lr) - lr*g
+             with __import__("torch").no_grad():
+                 for group in self.opt.param_groups:
+                     for p in group["params"]:
+-                        p.data.mul_(1.0 - self.manual_wd * self.manual_wd_factor)
++                        p.data.mul_(1.0 - self.manual_wd * factor)
          self.last_lr = lr
          self._applied = True
          return lr
-@@ -114,22 +132,46 @@ def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
- def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
-                    global_name: str, total_epochs: float, end_ratio: float,
-                    weight_decay: float, wd_on_effective_lr: bool = True,
--                   momentum: float = 0.0):
-+                   momentum: float = 0.0, wd_mode: str | None = None):
-     """Stock SGD + external schedule.
- 
--    Weight-decay coupling is the subtle part: torch.optim.SGD applies decay
--    against group['lr'] only, which here is the *effective* (already scheduled)
--    LR. So with wd_on_effective_lr=True this arm matches DualScheduledSGD
--    exactly. To reproduce the 'decay on base LR only' variant, pass
--    weight_decay=0 here and add the decay term manually.
-+    Weight-decay coupling is the subtle part. torch.optim.SGD can only decay
-+    against group['lr'], which the scheduler overwrites with the effective
-+    (scheduled) LR every step. So:
-+      wd_on_effective_lr=True  -> stock SGD decay; matches DualScheduledSGD.
-+      wd_on_effective_lr=False -> disable torch's decay and apply it manually
-+                                  against the constant base LR (lr_max), which
-+                                  is what DualScheduledSGD does in that mode.
-+    An earlier version of this function simply passed weight_decay=0 for the
-+    False case and never added the manual term, so the "B2" arm silently ran
-+    with NO weight decay. Fixed here.
-     """
-     from torch.optim import SGD
-     # start at lr_min: step 0 of the triangular wave is the minimum, and if a
-     # caller forgets to prep() before the first step we want the benign value.
-+    #
-+    # wd_on_effective_lr=True  -> let torch decay against group['lr'], which the
-+    #                             scheduler sets to the effective (scheduled) LR
-+    # wd_on_effective_lr=False -> torch must NOT decay (it would use the
-+    #                             effective LR anyway); instead apply the decay
-+    #                             manually against the constant base LR lr_max,
-+    #                             which is what DualScheduledSGD does when
-+    #                             wd_on_effective_lr=False (group['lr'] stays at
-+    #                             lr_max there).
-+    # `wd_mode` supersedes the boolean; keep the boolean for old call sites.
-+    if wd_mode is None:
-+        wd_mode = "effective" if wd_on_effective_lr else "base"
-+    if wd_mode not in ("effective", "base", "none"):
-+        raise ValueError(f"unknown wd_mode {wd_mode!r}")
-+    use_torch_wd = (wd_mode == "effective")
-     opt = SGD(model.parameters(), lr=lr_max / lr_SWR, momentum=momentum,
--              weight_decay=weight_decay if wd_on_effective_lr else 0.0)
-+              weight_decay=weight_decay if use_torch_wd else 0.0)
-     sch = ExternalDualScheduler(opt, steps_per_epoch, lr_max, lr_SWR,
-                                 global_name, total_epochs, end_ratio)
-+    sch.wd_mode = wd_mode
-+    if not use_torch_wd:
-+        sch.manual_wd = weight_decay
-+        sch.manual_wd_factor = lr_max if wd_mode == "base" else 1.0
+@@ -171,7 +184,7 @@ def build_external(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
+     sch.wd_mode = wd_mode
+     if not use_torch_wd:
+         sch.manual_wd = weight_decay
+-        sch.manual_wd_factor = lr_max if wd_mode == "base" else 1.0
++        sch.manual_wd_factor = 1.0        # "base" computes its factor per step
      return opt, sch
  
  
 diff --git a/src/schedules.py b/src/schedules.py
-index c1280b3..5d8334e 100644
+index 5d8334e..d1f53ec 100644
 --- a/src/schedules.py
 +++ b/src/schedules.py
-@@ -87,3 +87,42 @@ def effective_lr_series(
-         out.append(g(step / steps_per_epoch) * triangle_wave(c, steps_per_epoch,
-                                                              lr_max, lr_min))
-     return out
-+
-+
-+def mean_effective_lr(steps_per_epoch: int, lr_max: float, lr_SWR: float,
-+                      epochs: int, global_name: str = "cosine",
-+                      end_ratio: float = 1e-4) -> float:
-+    """Time-averaged effective LR over a whole run."""
-+    series = effective_lr_series(steps_per_epoch, lr_max, lr_SWR, epochs,
-+                                 global_name, end_ratio)
-+    return sum(series) / len(series)
-+
-+
-+def matched_weight_decays(wd_effective: float, steps_per_epoch: int,
-+                          lr_max: float, lr_SWR: float, epochs: int,
-+                          global_name: str = "cosine",
-+                          end_ratio: float = 1e-4) -> dict:
-+    """Weight-decay coefficients giving EQUAL mean per-step shrink.
-+
-+    The three conventions shrink weights by different amounts at the same
-+    coefficient, because they multiply by a different LR:
-+
-+        "effective" : wd * lr_eff(t)   <- oscillating, annealed
-+        "base"      : wd * lr_max      <- constant
-+        "none"      : wd * 1           <- constant
-+
-+    At lr_max=0.8, lr_SWR=1000, 200 epochs, the mean effective LR is ~0.200, so
-+    equal coefficients would make "base" 4x and "none" 5x stronger than
-+    "effective". This helper rescales so the MEAN shrink matches and only the
-+    DISTRIBUTION over steps differs -- which is the mechanism under test.
-+    """
-+    mean_lr = mean_effective_lr(steps_per_epoch, lr_max, lr_SWR, epochs,
-+                                global_name, end_ratio)
-+    lam = wd_effective * mean_lr            # mean per-step shrink of "effective"
-+    return {
-+        "effective": wd_effective,
-+        "base": lam / lr_max,
-+        "none": lam,
-+        "_mean_per_step_shrink": lam,
-+        "_mean_effective_lr": mean_lr,
-+    }
+@@ -96,33 +96,3 @@ def mean_effective_lr(steps_per_epoch: int, lr_max: float, lr_SWR: float,
+     series = effective_lr_series(steps_per_epoch, lr_max, lr_SWR, epochs,
+                                  global_name, end_ratio)
+     return sum(series) / len(series)
+-
+-
+-def matched_weight_decays(wd_effective: float, steps_per_epoch: int,
+-                          lr_max: float, lr_SWR: float, epochs: int,
+-                          global_name: str = "cosine",
+-                          end_ratio: float = 1e-4) -> dict:
+-    """Weight-decay coefficients giving EQUAL mean per-step shrink.
+-
+-    The three conventions shrink weights by different amounts at the same
+-    coefficient, because they multiply by a different LR:
+-
+-        "effective" : wd * lr_eff(t)   <- oscillating, annealed
+-        "base"      : wd * lr_max      <- constant
+-        "none"      : wd * 1           <- constant
+-
+-    At lr_max=0.8, lr_SWR=1000, 200 epochs, the mean effective LR is ~0.200, so
+-    equal coefficients would make "base" 4x and "none" 5x stronger than
+-    "effective". This helper rescales so the MEAN shrink matches and only the
+-    DISTRIBUTION over steps differs -- which is the mechanism under test.
+-    """
+-    mean_lr = mean_effective_lr(steps_per_epoch, lr_max, lr_SWR, epochs,
+-                                global_name, end_ratio)
+-    lam = wd_effective * mean_lr            # mean per-step shrink of "effective"
+-    return {
+-        "effective": wd_effective,
+-        "base": lam / lr_max,
+-        "none": lam,
+-        "_mean_per_step_shrink": lam,
+-        "_mean_effective_lr": mean_lr,
+-    }
 diff --git a/src/sgd_dual.py b/src/sgd_dual.py
-index ab422a7..9ad0c5e 100644
+index 9ad0c5e..69ab28e 100644
 --- a/src/sgd_dual.py
 +++ b/src/sgd_dual.py
-@@ -72,6 +72,7 @@ class DualScheduledSGD(Optimizer):
-         weight_decay: float = 0.0,
-         momentum: float = 0.0,
-         wd_on_effective_lr: bool = True,
-+        wd_mode: str | None = None,
-     ):
-         if lr_SWR <= 0.0:
-             raise ValueError(f"lr_SWR must be positive, got {lr_SWR}")
-@@ -91,6 +92,11 @@ class DualScheduledSGD(Optimizer):
- 
-         self.global_schedule = global_schedule
-         self.wd_on_effective_lr = wd_on_effective_lr
-+        if wd_mode is None:
-+            wd_mode = "effective" if wd_on_effective_lr else "base"
-+        if wd_mode not in ("effective", "base", "none"):
-+            raise ValueError(f"unknown wd_mode {wd_mode!r}")
-+        self.wd_mode = wd_mode
-         self._triangle = TriangleWave()
-         self._steps_done = 0
- 
-@@ -161,7 +167,12 @@ class DualScheduledSGD(Optimizer):
-                 # the already-updated weight; measured divergence 3.2e-6 after a
+@@ -168,9 +168,15 @@ class DualScheduledSGD(Optimizer):
                  # single step, 2.1e-4 after 40.
                  if weight_decay != 0:
--                    wd_lr = lr_effective if self.wd_on_effective_lr else group["lr"]
-+                    if self.wd_mode == "effective":
-+                        wd_lr = lr_effective          # oscillating / annealed
-+                    elif self.wd_mode == "base":
-+                        wd_lr = group["lr"]           # constant lr_max
-+                    else:                             # "none"
-+                        wd_lr = 1.0                   # no LR scaling at all
+                     if self.wd_mode == "effective":
+-                        wd_lr = lr_effective          # oscillating / annealed
++                        wd_lr = lr_effective          # triangle x cosine
+                     elif self.wd_mode == "base":
+-                        wd_lr = group["lr"]           # constant lr_max
++                        # ANNEALED base lr = peak of the triangle envelope.
++                        # group["lr"] alone is constant lr_max, which drops the
++                        # cosine -- see the note in dual_scheduler.prep().
++                        base = group["lr"]
++                        if self.global_schedule is not None:
++                            base *= self.global_schedule(self.epoch_fraction())
++                        wd_lr = base
+                     else:                             # "none"
+                         wd_lr = 1.0                   # no LR scaling at all
                      p.data.mul_(1.0 - weight_decay * wd_lr)
- 
-                 p.data.add_(d_p, alpha=-lr_effective)
-diff --git a/src/trainer.py b/src/trainer.py
-index ca2748f..e424988 100644
---- a/src/trainer.py
-+++ b/src/trainer.py
-@@ -108,6 +108,12 @@ def run_arm(
-     if torch.cuda.is_available():
-         torch.cuda.manual_seed_all(seed)
- 
-+    # Fixed input shape (32x32 CIFAR) makes cuDNN autotuning worth it: it picks
-+    # the fastest conv algorithms on the first few iterations. Off by default in
-+    # torch, costs one short warmup, and does not change the math.
-+    if str(device).startswith("cuda") and torch.cuda.is_available():
-+        torch.backends.cudnn.benchmark = True
-+
-     model = make_model().to(device)
-     opt, sched = make_optimizer_and_scheduler(model)
-     criterion = torch.nn.CrossEntropyLoss()
-@@ -117,6 +123,7 @@ def run_arm(
-     rows = []
-     val_hist = []          # per-epoch validation curve (for time-to-threshold)
-     global_step = 0
-+    csv_buffer = []        # batched CSV writes (see note in the inner loop)
- 
-     with open(path, "w", newline="") as fh:
-         w = csv.writer(fh)
-@@ -134,42 +141,67 @@ def run_arm(
-                 out = model(x)
-                 loss = criterion(out, y)
-                 loss.backward()
--                loss_value = float(loss.detach())
--
--                # measured BEFORE the update, so it reflects the step that is about
--                # to be taken (this is the quantity that diverges first)
--                grad_norm = float(
--                    torch.sqrt(sum((p.grad.detach() ** 2).sum()
--                                   for p in model.parameters() if p.grad is not None))
--                )
--                # The LR actually used for THIS step. Reading group['lr'] is
--                # wrong for optimizers that carry the schedule internally
--                # (DualScheduledSGD never touches group['lr']; it holds lr_max
--                # forever), which made internal-arm logs read a constant 0.8.
--                if hasattr(opt, "effective_lr"):
--                    sc = opt.state.get(next(iter(opt.state)), {}).get("step_count", 0)                          if opt.state else 0
--                    lr_now = float(opt.effective_lr(sc))
--                elif sched is not None and getattr(sched, "last_lr", None) is not None \
--                        and getattr(sched, "_applied", False):
--                    lr_now = float(sched.last_lr)
--                else:
--                    lr_now = float(opt.param_groups[0]["lr"])
--
--                train_step(opt, sched, loss)   # ordering handled in one place
- 
--                with torch.no_grad():
--                    acc = (out.argmax(1) == y).float().mean().item()
--                    wnorm = float(torch.sqrt(sum((p.detach() ** 2).sum()
--                                                 for p in model.parameters())))
--                    pmax = float(max((p.detach().abs().max() for p in model.parameters()),
--                                     default=0.0))
--
--                if global_step % log_every == 0:
--                    w.writerow([global_step, epoch, step_in_epoch, lr_now,
--                                loss_value, acc, grad_norm, wnorm, pmax])
-+                # ------------------------------------------------------------
-+                # Logging is gated *before* any synchronisation. Every
-+                # float()/.item() on a CUDA tensor blocks the CPU until the GPU
-+                # queue drains, and each one costs a pipeline refill. An earlier
-+                # version computed all metrics on every step and only gated the
-+                # CSV write, which cost ~6 explicit syncs plus -- because
-+                # `max()` over a generator of CUDA tensors syncs on EVERY
-+                # comparison -- roughly one more sync per parameter tensor.
-+                # On ResNet-18 that is ~60 syncs/step, which is the likely
-+                # reason this trainer ran ~2x slower than a metrics-free loop.
-+                # Now: zero syncs on non-logged steps.
-+                # ------------------------------------------------------------
-+                should_log = (global_step % log_every == 0)
-+
-+                if should_log:
-+                    loss_value = float(loss.detach())          # 1 sync
-+
-+                    # one reduction -> one sync, instead of one per tensor
-+                    grads = [q.grad.detach() for q in model.parameters()
-+                             if q.grad is not None]
-+                    grad_norm = float(torch.sqrt(
-+                        sum((g * g).sum() for g in grads)))    # 1 sync
-+
-+                    # The LR actually used for THIS step. Reading group['lr'] is
-+                    # wrong for optimizers that carry the schedule internally
-+                    # (DualScheduledSGD never touches group['lr']; it holds
-+                    # lr_max forever), which made internal-arm logs read 0.8.
-+                    if hasattr(opt, "effective_lr"):
-+                        sc = (opt.state.get(next(iter(opt.state)), {})
-+                              .get("step_count", 0)) if opt.state else 0
-+                        lr_now = float(opt.effective_lr(sc))   # pure python
-+                    elif sched is not None and \
-+                            getattr(sched, "last_lr", None) is not None and \
-+                            getattr(sched, "_applied", False):
-+                        lr_now = float(sched.last_lr)          # pure python
-+                    else:
-+                        lr_now = float(opt.param_groups[0]["lr"])
-+
-+                    with torch.no_grad():
-+                        ps = [q.detach() for q in model.parameters()]
-+                        wnorm = float(torch.sqrt(
-+                            sum((q * q).sum() for q in ps)))    # 1 sync
-+                        pmax = float(torch.stack(
-+                            [q.abs().max() for q in ps]).max())  # 1 sync
-+                        acc = float((out.argmax(1) == y).float().mean())  # 1 sync
-+
-+                    csv_buffer.append([global_step, epoch, step_in_epoch,
-+                                       lr_now, loss_value, acc, grad_norm,
-+                                       wnorm, pmax])
-                     rows.append({"loss": loss_value, "acc": acc})
- 
-+                    if len(csv_buffer) >= 200:
-+                        w.writerows(csv_buffer)
-+                        csv_buffer.clear()
-+
-+                train_step(opt, sched, loss)   # ordering handled in one place
-                 global_step += 1
-+            if csv_buffer:            # flush leftovers at the epoch boundary
-+                w.writerows(csv_buffer)
-+                csv_buffer.clear()
- 
-             val_loss, val_acc = eval_fn(model, None)
-             val_hist.append({"epoch": epoch + 1, "val_loss": val_loss,
 diff --git a/tests/test_schedule_math.py b/tests/test_schedule_math.py
-index 7f65b47..d4938e2 100644
+index d4938e2..954555b 100644
 --- a/tests/test_schedule_math.py
 +++ b/tests/test_schedule_math.py
-@@ -236,3 +236,167 @@ class TestLoggingReportsTrueLR(unittest.TestCase):
-                         "effective LR should rise through the first half-cycle")
-         self.assertEqual(opt.param_groups[0]["lr"], 0.8,
-                          "group['lr'] is intentionally static for the internal optimizer")
+@@ -348,55 +348,43 @@ class TestLoggingDoesNotAffectTraining(unittest.TestCase):
+ 
+ 
+ class TestWeightDecayModes(unittest.TestCase):
+-    """The three conventions must differ only in the DISTRIBUTION of decay,
+-    not in mean strength.
++    """Three conventions, one literal coefficient.
+ 
+-    NOTE: matching is over the WHOLE run. Epoch 0 sits at ~2x the run-average
+-    effective LR (the cosine has not annealed yet), so any single early epoch
+-    shows "effective" decaying harder. Compare over all 200 epochs.
++    effective : wd * triangle(step) * cosine(epoch)   oscillating + annealed
++    base      : wd * lr_max * cosine(epoch)           smooth + annealed
++    none      : wd                                    no lr scaling
 +
++    They deliberately have different mean strengths; the arms differ only in
++    what the coefficient multiplies.
+     """
+ 
+-    def test_cumulative_decay_matched_over_full_run(self):
+-        from schedules import (effective_lr_series, matched_weight_decays)
+-
+-        spe, epochs = 390, 200
+-        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
+-        m = matched_weight_decays(5e-4, spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
+-
+-        total = {
+-            "effective": sum(m["effective"] * x for x in lr),
+-            "base": sum(m["base"] * 0.8 for _ in lr),
+-            "none": sum(m["none"] for _ in lr),
+-        }
+-        print("\n  cumulative per-step shrink over the full run:", total)
+-        lo, hi = min(total.values()), max(total.values())
+-        self.assertLess((hi - lo) / hi, 1e-6)
+-
+-        # and the weight trajectory must agree to well under 1%
+-        w = {}
+-        for k, lam in (("effective", None), ("base", m["base"] * 0.8),
+-                       ("none", m["none"])):
+-            ww = 1.0
+-            for i, x in enumerate(lr):
+-                step_lam = (m["effective"] * x) if k == "effective" else lam
+-                ww *= (1.0 - step_lam)
+-            w[k] = ww
+-        print("  final weight after decay only:", {k: round(v, 5) for k, v in w.items()})
+-        vals = list(w.values())
+-        self.assertLess((max(vals) - min(vals)) / max(vals), 0.01)
+-
+-    def test_unmatched_would_differ_a_lot(self):
+-        """At the SAME coefficient the conventions are NOT comparable."""
+-        from schedules import effective_lr_series
+-        spe, epochs = 390, 200
+-        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
++    def test_base_anneals(self):
++        from schedules import cosine_anneal
++        early = 0.8 * cosine_anneal(0, 200, 1e-4)
++        late = 0.8 * cosine_anneal(199, 200, 1e-4)
++        self.assertGreater(early, 100 * late)
 +
-+class TestWeightDecayConventions(unittest.TestCase):
-+    """Both weight-decay conventions must match between the internal optimizer
-+    and the external composition.
++    def test_base_differs_from_none(self):
++        """Regression: 'base' once multiplied by a CONSTANT lr_max, dropping the
++        cosine, which made it arithmetically identical to 'none' (pilot: 0.9406
++        twice, wnorm 6.54 vs 6.52)."""
++        from schedules import cosine_anneal
+         wd = 5e-4
+-        tot = {
+-            "effective": sum(wd * x for x in lr),
+-            "base": sum(wd * 0.8 for _ in lr),
+-            "none": sum(wd for _ in lr),
+-        }
+-        print("\n  same wd=5e-4, cumulative shrink:", {k: round(v, 1) for k, v in tot.items()})
+-        # none is ~5x, base ~4x the effective convention
+-        self.assertGreater(tot["none"] / tot["effective"], 4.0)
+-        self.assertGreater(tot["base"] / tot["effective"], 3.0)
++        base_ep50 = wd * 0.8 * cosine_anneal(50, 200, 1e-4)
++        none = wd * 1.0
++        self.assertNotAlmostEqual(base_ep50, none, places=12)
++        self.assertLess(base_ep50, none)      # base has annealed below the constant
 +
-+    Regression guard for a real bug: build_external used to pass
-+    weight_decay=0.0 for wd_on_effective_lr=False and never add the manual term,
-+    so that arm silently trained with no decay at all.
-+    """
-+
-+    def test_both_conventions_match(self):
-+        try:
-+            import torch
-+        except ImportError:
-+            self.skipTest("torch not installed")
-+        from dual_scheduler import build_external, build_internal, train_step
-+
-+        base = torch.randn(6)
-+
-+        def run(kind, wd_eff):
-+            class M(torch.nn.Module):
-+                def __init__(s):
-+                    super().__init__()
-+                    s.w = torch.nn.Parameter(base.clone())
-+            m = M()
-+            build = build_internal if kind == "internal" else build_external
-+            opt, sch = build(m, 20, 0.8, 1000.0, "cosine", 3, 1e-4, 5e-4, wd_eff)
-+            for _ in range(40):
-+                m.w.grad = torch.full_like(m.w, 0.1)
-+                train_step(opt, sch, None)
-+            return m.w.detach().clone()
-+
-+        for flag in (True, False):
-+            with self.subTest(wd_on_effective_lr=flag):
-+                a, b = run("internal", flag), run("external", flag)
-+                rel = float((a - b).abs().max()) / max(float(a.abs().max()), 1e-12)
-+                self.assertLess(rel, 1e-4)
-+
-+    def test_base_lr_decay_is_stronger_than_no_decay(self):
-+        try:
-+            import torch
-+        except ImportError:
-+            self.skipTest("torch not installed")
-+        from dual_scheduler import build_internal, train_step
-+
-+        base = torch.randn(6)
-+
-+        def run(wd, flag):
-+            class M(torch.nn.Module):
-+                def __init__(s):
-+                    super().__init__()
-+                    s.w = torch.nn.Parameter(base.clone())
-+                def params(s):
-+                    return [s.w]
-+            m = M()
-+            opt, sch = build_internal(m, 20, 0.8, 1000.0, "cosine", 3, 1e-4, wd, flag)
-+            for _ in range(40):
-+                m.w.grad = torch.full_like(m.w, 0.1)
-+                train_step(opt, sch, None)
-+            return float(m.w.detach().norm())
-+
-+        self.assertLess(run(5e-4, False), run(0.0, True),
-+                        "decay against base LR should shrink weights more than no decay")
-+
-+
-+class TestLoggingDoesNotAffectTraining(unittest.TestCase):
-+    """Logging must be observation-only.
-+
-+    This also guards the performance refactor: metrics are now computed only on
-+    logged steps, so a mistake there could silently change training. Results at
-+    log_every=1 and log_every=100000 must be bit-identical.
-+    """
-+
-+    def test_log_every_invariance(self):
-+        try:
-+            import json, os, tempfile
-+            import torch
-+        except ImportError:
-+            self.skipTest("torch not installed")
-+        import sys
-+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-+        from backends import build as build_backend
-+        from dual_scheduler import build_external
-+        from trainer import run_arm
-+
-+        cfg_path = os.path.join(os.path.dirname(__file__), "..", "configs", "tiny.json")
-+        cfg = json.load(open(cfg_path))
-+        cfg["epochs"] = 2
-+        tl, _v, _t, make_model, eval_fn, spe = build_backend(cfg)
-+
-+        def builder(model):
-+            return build_external(model, steps_per_epoch=spe, lr_max=cfg["lr_max"],
-+                                  lr_SWR=cfg["lr_SWR"],
-+                                  global_name=cfg["global_schedule"],
-+                                  total_epochs=cfg["epochs"],
-+                                  end_ratio=cfg["end_ratio"],
-+                                  weight_decay=cfg["weight_decay"],
-+                                  wd_on_effective_lr=True)
-+
-+        out = {}
-+        for le in (1, 100000):
-+            with tempfile.TemporaryDirectory() as td:
-+                out[le] = run_arm("t", make_model, builder, tl, eval_fn,
-+                                  epochs=2, steps_per_epoch=spe, device="cpu",
-+                                  log_every=le, out_dir=td, seed=0)
-+        self.assertEqual(out[1]["final_val_acc"], out[100000]["final_val_acc"])
-+        self.assertEqual([h["val_acc"] for h in out[1]["val_history"]],
-+                         [h["val_acc"] for h in out[100000]["val_history"]])
-+
-+
-+class TestWeightDecayModes(unittest.TestCase):
-+    """The three conventions must differ only in the DISTRIBUTION of decay,
-+    not in mean strength.
-+
-+    NOTE: matching is over the WHOLE run. Epoch 0 sits at ~2x the run-average
-+    effective LR (the cosine has not annealed yet), so any single early epoch
-+    shows "effective" decaying harder. Compare over all 200 epochs.
-+    """
-+
-+    def test_cumulative_decay_matched_over_full_run(self):
-+        from schedules import (effective_lr_series, matched_weight_decays)
-+
-+        spe, epochs = 390, 200
-+        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
-+        m = matched_weight_decays(5e-4, spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
-+
-+        total = {
-+            "effective": sum(m["effective"] * x for x in lr),
-+            "base": sum(m["base"] * 0.8 for _ in lr),
-+            "none": sum(m["none"] for _ in lr),
-+        }
-+        print("\n  cumulative per-step shrink over the full run:", total)
-+        lo, hi = min(total.values()), max(total.values())
-+        self.assertLess((hi - lo) / hi, 1e-6)
-+
-+        # and the weight trajectory must agree to well under 1%
-+        w = {}
-+        for k, lam in (("effective", None), ("base", m["base"] * 0.8),
-+                       ("none", m["none"])):
-+            ww = 1.0
-+            for i, x in enumerate(lr):
-+                step_lam = (m["effective"] * x) if k == "effective" else lam
-+                ww *= (1.0 - step_lam)
-+            w[k] = ww
-+        print("  final weight after decay only:", {k: round(v, 5) for k, v in w.items()})
-+        vals = list(w.values())
-+        self.assertLess((max(vals) - min(vals)) / max(vals), 0.01)
-+
-+    def test_unmatched_would_differ_a_lot(self):
-+        """At the SAME coefficient the conventions are NOT comparable."""
-+        from schedules import effective_lr_series
-+        spe, epochs = 390, 200
-+        lr = effective_lr_series(spe, 0.8, 1000.0, epochs, "cosine", 1e-4)
-+        wd = 5e-4
-+        tot = {
-+            "effective": sum(wd * x for x in lr),
-+            "base": sum(wd * 0.8 for _ in lr),
-+            "none": sum(wd for _ in lr),
-+        }
-+        print("\n  same wd=5e-4, cumulative shrink:", {k: round(v, 1) for k, v in tot.items()})
-+        # none is ~5x, base ~4x the effective convention
-+        self.assertGreater(tot["none"] / tot["effective"], 4.0)
-+        self.assertGreater(tot["base"] / tot["effective"], 3.0)
++    def test_mean_strengths_differ_by_convention(self):
++        """Document the consequence of one literal coefficient: 1x / 2x / 5x."""
++        from schedules import mean_effective_lr
++        wd, spe, T = 5e-4, 390, 200
++        mean_eff = mean_effective_lr(spe, 0.8, 1000.0, T, "cosine", 1e-4)
++        mean_base = mean_effective_lr(spe, 0.8, 1.0, T, "cosine", 1e-4)
++        strengths = {"effective": wd * mean_eff, "base": wd * mean_base,
++                     "none": wd * 1.0}
++        print("\n  mean per-step shrink:", {k: f"{v:.2e}" for k, v in strengths.items()})
++        self.assertAlmostEqual(strengths["base"] / strengths["effective"], 2.0,
++                               delta=0.05)
++        self.assertAlmostEqual(strengths["none"] / strengths["effective"], 5.0,
++                               delta=0.1)
