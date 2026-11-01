@@ -94,31 +94,20 @@ def load_config(path):
     return cfg
 
 
-def wd_for_arm(cfg, spe):
-    """Weight-decay coefficient per convention, matched on mean shrink.
-
-    `weight_decay` in the config is the coefficient for the *effective* (method)
-    convention. The "base" and "none" conventions are rescaled so their mean
-    per-step shrink matches, otherwise they would be 4x and 5x stronger and the
-    comparison would measure magnitude rather than distribution.
-    """
-    from schedules import matched_weight_decays
-    m = matched_weight_decays(cfg["weight_decay"], spe, cfg["lr_max"],
-                              cfg["lr_SWR"], cfg["epochs"],
-                              cfg["global_schedule"], cfg["end_ratio"],
-                              target_mean_shrink=cfg.get("target_mean_shrink"))
-    return m
-
-
 def make_opt_builder(cfg, spe, arm):
-    m = wd_for_arm(cfg, spe)
+    # Every arm gets the SAME literal weight_decay from the config. The arms
+    # differ only in what that coefficient is multiplied by:
+    #     B1 effective : wd * triangle(step) * cosine(epoch)
+    #     B2 base      : wd * lr_max * cosine(epoch)
+    #     F  none      : wd
+    # They therefore have different MEAN decay strengths. That is accepted
+    # deliberately: it is the literal "what happens if you set weight_decay=X"
+    # comparison. (An automatic strength-matching layer was tried and removed as
+    # over-engineering; see git history if it is ever wanted again.)
     common = dict(steps_per_epoch=spe, lr_max=cfg["lr_max"],
                   lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
                   total_epochs=cfg["epochs"], end_ratio=cfg["end_ratio"],
-                  # For the "effective" convention this is the RESOLVED
-                  # coefficient, which equals cfg["weight_decay"] unless
-                  # target_mean_shrink is set.
-                  weight_decay=m["effective"],
+                  weight_decay=float(cfg["weight_decay"]),
                   momentum=cfg.get("momentum", 0.0))
 
     def build(model):
@@ -127,11 +116,9 @@ def make_opt_builder(cfg, spe, arm):
         if arm == "B1_external_wd_eff":
             return build_external(model, wd_on_effective_lr=True, **common)
         if arm == "B2_external_wd_base":
-            c = dict(common); c["weight_decay"] = m["base"]
-            return build_external(model, wd_mode="base", **c)
+            return build_external(model, wd_mode="base", **common)
         if arm == "F_external_wd_none":
-            c = dict(common); c["weight_decay"] = m["none"]
-            return build_external(model, wd_mode="none", **c)
+            return build_external(model, wd_mode="none", **common)
         if arm == "C_cosine_only":
             c = dict(common)
             c["lr_SWR"] = 1.0          # min == max -> no triangular component

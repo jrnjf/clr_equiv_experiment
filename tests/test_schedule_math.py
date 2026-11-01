@@ -348,50 +348,43 @@ class TestLoggingDoesNotAffectTraining(unittest.TestCase):
 
 
 class TestWeightDecayModes(unittest.TestCase):
-    """Three conventions, same mean strength, different distribution.
+    """Three conventions, one literal coefficient.
 
     effective : wd * triangle(step) * cosine(epoch)   oscillating + annealed
     base      : wd * lr_max * cosine(epoch)           smooth + annealed
     none      : wd                                    no lr scaling
 
-    All three must give the same cumulative shrink, otherwise the ablation
-    measures magnitude rather than distribution.
+    They deliberately have different mean strengths; the arms differ only in
+    what the coefficient multiplies.
     """
 
-    def _series(self):
-        from schedules import cosine_anneal, effective_lr_series
-        spe, T, lr_max, end = 390, 200, 0.8, 1e-4
-        lr_eff = effective_lr_series(spe, lr_max, 1000.0, T, "cosine", end)
-        return spe, T, lr_max, end, lr_eff
+    def test_base_anneals(self):
+        from schedules import cosine_anneal
+        early = 0.8 * cosine_anneal(0, 200, 1e-4)
+        late = 0.8 * cosine_anneal(199, 200, 1e-4)
+        self.assertGreater(early, 100 * late)
 
-    def test_cumulative_shrink_matched(self):
-        from schedules import cosine_anneal, matched_weight_decays
-        spe, T, lr_max, end, lr_eff = self._series()
-        m = matched_weight_decays(5e-4, spe, lr_max, 1000.0, T, "cosine", end)
+    def test_base_differs_from_none(self):
+        """Regression: 'base' once multiplied by a CONSTANT lr_max, dropping the
+        cosine, which made it arithmetically identical to 'none' (pilot: 0.9406
+        twice, wnorm 6.54 vs 6.52)."""
+        from schedules import cosine_anneal
+        wd = 5e-4
+        base_ep50 = wd * 0.8 * cosine_anneal(50, 200, 1e-4)
+        none = wd * 1.0
+        self.assertNotAlmostEqual(base_ep50, none, places=12)
+        self.assertLess(base_ep50, none)      # base has annealed below the constant
 
-        cum = {"effective": 0.0, "base": 0.0, "none": 0.0}
-        for i, x in enumerate(lr_eff):
-            ep = i / spe                      # fractional epoch, as the code does
-            cum["effective"] += m["effective"] * x
-            cum["base"] += m["base"] * lr_max * cosine_anneal(ep, T, end)
-            cum["none"] += m["none"]
-        print("\n  cumulative shrink:", {k: round(v, 3) for k, v in cum.items()})
-        lo, hi = min(cum.values()), max(cum.values())
-        self.assertLess((hi - lo) / hi, 0.01, f"strengths not matched: {cum}")
-
-    def test_base_is_annealed_and_differs_from_none(self):
-        """Regression: 'base' used to multiply by a CONSTANT lr_max, dropping the
-        cosine, which made it identical to 'none' once strength was matched
-        (pilot: 0.9406 vs 0.9406)."""
-        from schedules import cosine_anneal, matched_weight_decays
-        spe, T, lr_max, end, _ = self._series()
-        m = matched_weight_decays(5e-4, spe, lr_max, 1000.0, T, "cosine", end)
-        self.assertNotAlmostEqual(m["base"], m["none"], places=12)
-        # "none" scales by 1, so its coefficient IS the target shrink; "base"
-        # scales by the annealed base lr (mean ~0.4), so its coefficient is
-        # 1/mean_base ~2.5x larger.
-        self.assertAlmostEqual(m["base"] / m["none"], 1.0 / m["_mean_base_lr"],
-                               places=6)
-        early = m["base"] * lr_max * cosine_anneal(0, T, end)
-        late = m["base"] * lr_max * cosine_anneal(199, T, end)
-        self.assertGreater(early, 100 * late, "base decay must anneal")
+    def test_mean_strengths_differ_by_convention(self):
+        """Document the consequence of one literal coefficient: 1x / 2x / 5x."""
+        from schedules import mean_effective_lr
+        wd, spe, T = 5e-4, 390, 200
+        mean_eff = mean_effective_lr(spe, 0.8, 1000.0, T, "cosine", 1e-4)
+        mean_base = mean_effective_lr(spe, 0.8, 1.0, T, "cosine", 1e-4)
+        strengths = {"effective": wd * mean_eff, "base": wd * mean_base,
+                     "none": wd * 1.0}
+        print("\n  mean per-step shrink:", {k: f"{v:.2e}" for k, v in strengths.items()})
+        self.assertAlmostEqual(strengths["base"] / strengths["effective"], 2.0,
+                               delta=0.05)
+        self.assertAlmostEqual(strengths["none"] / strengths["effective"], 5.0,
+                               delta=0.1)

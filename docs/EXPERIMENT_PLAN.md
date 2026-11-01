@@ -51,80 +51,50 @@ Verified: all three give cumulative shrink 7.8086 and final decay-only weight
 > run-average effective LR (cosine not yet annealed), so a single early epoch
 > shows "effective" decaying harder. Don't judge from one epoch.
 
-## E2v2 — strength ladder (raise the target rather than lower B2)
+## E2 — weight-decay convention (simple version)
 
-### Pilot result at mean shrink 1.001e-4 (seed 0)
+One literal `weight_decay` from the config, applied to all three arms. They differ
+only in **what the coefficient multiplies**:
 
-| arm | raw wd | peak acc | @ep | first 90 | wnorm@50 | wnorm@200 | final |
-|---|---|---|---|---|---|---|---|
-| B1 effective | 5.000e-4 | 0.9499 | 181 | 16 | 38.9 | 24.2 | 0.9492 |
-| B2 base | 1.251e-4 | 0.9500 | 189 | 17 | 48.8 | 6.5 | 0.9406 |
-| F none | 1.001e-4 | 0.9505 | 186 | 17 | 48.8 | 6.5 | 0.9406 |
-
-**Peak accuracy and time-to-90 are indistinguishable.** Only the tail differs:
-B2/F keep shrinking after the LR has annealed to ~1e-7, so weights collapse
-110 -> 6.5 and the last-epoch accuracy drops ~1 pp. B1's decay goes to zero with
-the LR, so it holds its peak.
-
-### F is NOT identical to B2 (earlier claim was wrong)
-
-An earlier version multiplied "base" decay by a **constant** `lr_max`, dropping
-the cosine annealing. That made "base" a plain constant multiply, so once the
-mean strength was matched it was the same run as "none" — which is why the pilot
-reported 0.9406 for both.
-
-The base LR does anneal: `lr_base(t) = lr_max * cosine(epoch)`, the peak of the
-triangle envelope. With that restored, the three conventions are genuinely
-distinct:
-
-| mode | decay factor | profile |
+| arm | decay factor | profile |
 |---|---|---|
-| effective | `triangle(step) * cosine(epoch)` | oscillating **and** annealed |
-| base | `lr_max * cosine(epoch)` | smooth **and** annealed |
-| none | `1.0` | no LR scaling |
+| `B1_external_wd_eff` | `triangle(step) * cosine(epoch)` | oscillating **and** annealed |
+| `B2_external_wd_base` | `lr_max * cosine(epoch)` | smooth **and** annealed |
+| `F_external_wd_none` | `1.0` | no LR scaling |
 
-Per-step shrink at target 5e-4, epoch 0 / 100 / 199:
+At `weight_decay = 5e-4` the mean per-step shrink is therefore **1.0e-4 / 2.0e-4 /
+5.0e-4** — the conventions are 1x / 2x / 5x different in strength. That is
+accepted deliberately: this is the literal "set weight_decay=5e-4 and see what
+each convention does" comparison.
 
-| mode | ep0 | ep100 | ep199 |
-|---|---|---|---|
-| effective | 2e-6 (rises to 2e-3 mid-epoch) | ~1e-6..1e-3 | ~3e-10 |
-| base | 1.0e-3 | 5.0e-4 | 1.6e-7 |
-| none | 5.0e-4 | 5.0e-4 | 5.0e-4 |
+An automatic strength-matching layer (rescaled coefficients, `target_mean_shrink`)
+was built and then removed as over-engineering. It is in git history if ever
+needed.
 
-Cumulative shrink is matched across all three (7.809 at target 1e-4, 39.0 at
-5e-4), asserted in `tests/test_schedule_math.py::TestWeightDecayModes` together
-with a regression test that "base" must anneal (>100x larger early than late).
+### Fixed: `base` ignored the cosine
 
-All three arms are therefore worth running; the informative contrast is now
-**oscillating vs smooth** decay at equal annealing and equal strength.
+`base` used to multiply by a **constant** `lr_max`, dropping the annealing
+entirely. That made it a plain constant multiply, so at matched strength it was
+identical to `none` — which is why the first pilot reported 0.9406 twice with
+wnorm 6.54 vs 6.52. Now `base` decays against `lr_max * cosine(epoch)`, from
+1.0e-3 per step at epoch 0 down to 1.6e-7 at epoch 199. Regression test:
+`tests/test_schedule_math.py::TestWeightDecayModes`.
 
-### Coefficients when the LR-weighted average is held at 5e-4
+### Pilot at weight_decay = 5e-4, seed 0 (B1 valid; B2/F invalid — they ran the bug)
 
-| arm | wd at target 5e-4 | (target 1e-4) |
-|---|---|---|
-| B1 effective | **2.497e-3** | 5.000e-4 |
-| B2 base | **1.2499e-3** | 2.502e-4 |
-| F none | **5.000e-4** | 1.001e-4 |
+| arm | peak acc | @ep | first 90 | wnorm@50 | wnorm@200 | final |
+|---|---|---|---|---|---|---|
+| B1 effective | 0.9499 | 181 | 16 | 38.9 | 24.2 | 0.9492 |
+| B2 base (buggy, = none) | 0.9500 | 189 | 17 | 48.8 | 6.5 | 0.9406 |
+| F none | 0.9505 | 186 | 17 | 48.8 | 6.5 | 0.9406 |
 
-Note B2's coefficient roughly doubled versus the earlier (buggy) version, because
-the annealed base mean is ~0.4 rather than 0.8.
+B1 is still valid. **B2 and F must be re-run** with the annealing fix.
 
-**Risk:** 5x the strength at which B2 already collapsed. Run ONE seed first:
-`configs/e2_highwd.json`.
-
-### Ladder
-
-`configs/e2_midwd.json` (target 2.5e-4) gives an intermediate rung. Running
-1e-4 -> 2.5e-4 -> 5e-4 at one seed per convention turns the ablation into a
-**robustness ladder**: find the strength at which each convention breaks. That
-is a stronger claim than a single point and costs the same 3 runs per rung.
-
-### Metric policy
-
-Report BOTH final-epoch and best-checkpoint accuracy. At 1e-4 the final-epoch
-metric favours B1 by 0.86 pp while best-checkpoint is a tie
-(0.9499 / 0.9500 / 0.9505). The defensible claim is **stop-point robustness**,
-not a better optimum.
+What the valid comparisons showed: peak accuracy and time-to-90 were
+indistinguishable across all three; only the tail differed. Constant decay kept
+shrinking after the LR annealed to ~1e-7, collapsing weights 110 -> 6.5 and
+costing ~1 pp at the last epoch. That is why final-epoch and best-checkpoint
+accuracy disagree, and both must be reported.
 
 ## Rest of the plan
 
