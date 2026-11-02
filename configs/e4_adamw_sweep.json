@@ -1,0 +1,8 @@
+[
+  { "arms": ["AdamW_cosine"], "lr_max": 0.001, "weight_decay": 0.01,
+    "_note": "standard AdamW + cosine, typical wd scale for AdamW" },
+  { "arms": ["AdamW_cosine"], "lr_max": 0.0003, "weight_decay": 0.01,
+    "_note": "lower lr, in case 1e-3 is too high for this protocol" },
+  { "arms": ["AdamW_dual"], "lr_max": 0.001, "weight_decay": 0.01,
+    "_note": "same triangular x cosine cycle, on AdamW" }
+]

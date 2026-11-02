@@ -133,6 +133,42 @@ def build_constant(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
     return opt, None
 
 
+def build_adamw_cosine(model, steps_per_epoch: int, lr_max: float,
+                       lr_SWR: float, global_name: str, total_epochs: float,
+                       end_ratio: float, weight_decay: float,
+                       momentum: float = 0.0, **_ignored):
+    """AdamW with cosine annealing — the standard recipe we have to beat.
+
+    AdamW decays differently from SGD (decoupled, adam.py:419) and needs its own
+    weight_decay scale, so the config supplies it explicitly.
+    """
+    from torch.optim import AdamW
+    from torch.optim.lr_scheduler import LambdaLR
+
+    opt = AdamW(model.parameters(), lr=lr_max, weight_decay=weight_decay)
+    sched = LambdaLR(opt, dual_schedule_lambda(steps_per_epoch, lr_max, 1.0,
+                                               total_epochs, end_ratio,
+                                               global_name))
+    return opt, sched
+
+
+def build_adamw_dual(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                     global_name: str, total_epochs: float, end_ratio: float,
+                     weight_decay: float, momentum: float = 0.0, **_ignored):
+    """Same triangular x cosine schedule, but on AdamW.
+
+    Tests whether the cycle helps adaptive optimizers too, or only SGD.
+    """
+    from torch.optim import AdamW
+    from torch.optim.lr_scheduler import LambdaLR
+
+    opt = AdamW(model.parameters(), lr=lr_max, weight_decay=weight_decay)
+    sched = LambdaLR(opt, dual_schedule_lambda(steps_per_epoch, lr_max, lr_SWR,
+                                               total_epochs, end_ratio,
+                                               global_name))
+    return opt, sched
+
+
 def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    global_name: str, total_epochs: float, end_ratio: float,
                    weight_decay: float, wd_on_effective_lr: bool = True,
