@@ -235,6 +235,9 @@ def main(argv=None):
                     help="override cfg['out_dir'] (keeps runs separated)")
     ap.add_argument("--lr-max", type=float, default=None,
                     help="override cfg['lr_max'] (for a constant-LR sweep)")
+    ap.add_argument("--global-schedule", default=None,
+                    help="override cfg['global_schedule'] ('cosine' or "
+                         "'constant' to switch annealing off)")
     ap.add_argument("--seeds", nargs="*", type=int, default=None,
                     help="override cfg['seeds'] (e.g. --seeds 0 for a pilot)")
     ap.add_argument("--allow-odd", action="store_true",
@@ -249,6 +252,8 @@ def main(argv=None):
         cfg["seeds"] = args.seeds
     if args.lr_max is not None:
         cfg["lr_max"] = args.lr_max
+    if args.global_schedule is not None:
+        cfg["global_schedule"] = args.global_schedule
 
     if args.dry_run:
         return dry_run(cfg, allow_odd=args.allow_odd)
@@ -270,9 +275,14 @@ def main(argv=None):
     results = []
     for seed in cfg["seeds"]:
         for arm in args.arms:
-            # "constant" sweeps over lr_max, so fold the LR into the run name;
-            # otherwise every LR would overwrite the same (arm, seed) entry.
-            name = (f"constant_lr{cfg['lr_max']:g}" if arm == "constant" else arm)
+            # Any arm whose LR is overridden needs the LR in its name, otherwise
+            # a sweep overwrites its own (arm, seed) entries in the summary.
+            if arm == "constant":
+                name = f"constant_lr{cfg['lr_max']:g}"
+            elif args.lr_max is not None:
+                name = f"{arm}_lr{cfg['lr_max']:g}"
+            else:
+                name = arm
             print(f"\n=== {name} | seed {seed} ===")
             results.append(run_arm(
                 arm_name=name, make_model=make_model,
