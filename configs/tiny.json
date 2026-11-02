@@ -13,12 +13,13 @@
   ],
   "device": "cpu",
   "num_workers": 0,
-  "out_dir": "results",
+  "out_dir": "results_tiny",
   "log_every": 1,
   "tiny_train": 2048,
   "tiny_val": 512,
   "tiny_test": 512,
   "tiny_dim": 32,
   "tiny_hidden": 64,
-  "tiny_classes": 10
+  "tiny_classes": 10,
+  "_comment": "CPU synthetic correctness checks only. Writes to results_tiny so a smoke run can never overwrite CIFAR result files."
 }
