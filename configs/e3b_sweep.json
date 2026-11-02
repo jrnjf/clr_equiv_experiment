@@ -1,0 +1,18 @@
+[
+  {
+    "arms": ["B1_external_wd_eff"],
+    "global_schedule": "constant",
+    "suffix": "",
+    "_note": "cycling WITHOUT annealing: T_cos off, so the LR never decays"
+  },
+  {
+    "arms": ["C_cosine_only"],
+    "lr_max": 0.1,
+    "_note": "annealed, no cycling, at the classic CIFAR peak lr"
+  },
+  {
+    "arms": ["C_cosine_only"],
+    "lr_max": 0.2,
+    "_note": "annealed, no cycling, at the triangle's own mean-ish peak"
+  }
+]

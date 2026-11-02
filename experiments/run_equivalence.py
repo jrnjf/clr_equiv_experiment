@@ -235,6 +235,10 @@ def main(argv=None):
                     help="override cfg['out_dir'] (keeps runs separated)")
     ap.add_argument("--lr-max", type=float, default=None,
                     help="override cfg['lr_max'] (for a constant-LR sweep)")
+    ap.add_argument("--sweep", default=None,
+                    help="JSON list of run specs, each a dict of per-run "
+                         "overrides {arms, suffix, lr_max, global_schedule, "
+                         "seeds, ...}; runs them all in one invocation")
     ap.add_argument("--global-schedule", default=None,
                     help="override cfg['global_schedule'] ('cosine' or "
                          "'constant' to switch annealing off)")
@@ -270,27 +274,53 @@ def main(argv=None):
 
     train_loader, _val, _test, make_model, eval_fn, spe = build_backend(cfg)
     print(f"{cfg['backend']}: steps_per_epoch={spe} epochs={cfg['epochs']} "
-          f"arms={args.arms} seeds={cfg['seeds']} device={cfg['device']}")
+          f"device={cfg['device']}")
+
+    # Each spec is one (arm set, config) combination. A single-config invocation
+    # is just the one-element case, so both paths share this code.
+    if args.sweep:
+        specs = json.load(open(args.sweep))
+        if not isinstance(specs, list):
+            raise SystemExit("--sweep expects a JSON list of run specs")
+    else:
+        specs = [{"arms": list(args.arms), "seeds": cfg["seeds"]}]
 
     results = []
-    for seed in cfg["seeds"]:
-        for arm in args.arms:
-            # Any arm whose LR is overridden needs the LR in its name, otherwise
-            # a sweep overwrites its own (arm, seed) entries in the summary.
-            if arm == "constant":
-                name = f"constant_lr{cfg['lr_max']:g}"
-            elif args.lr_max is not None:
-                name = f"{arm}_lr{cfg['lr_max']:g}"
-            else:
+    for spec in specs:
+        spec = dict(spec)
+        arms = spec.pop("arms", list(args.arms))
+        suffix = spec.pop("suffix", "")
+        run_cfg = dict(cfg)
+        run_cfg.update(spec)
+        # remember what this spec overrode, for arm naming
+        lr_over = spec.get("lr_max")
+        sched_over = spec.get("global_schedule")
+
+        print(f"\n--- spec: arms={arms} lr_max={run_cfg['lr_max']:g} "
+              f"schedule={run_cfg['global_schedule']} "
+              f"seeds={run_cfg['seeds']} -> {run_cfg['out_dir']}")
+
+        for seed in run_cfg["seeds"]:
+            for arm in arms:
                 name = arm
-            print(f"\n=== {name} | seed {seed} ===")
-            results.append(run_arm(
-                arm_name=name, make_model=make_model,
-                make_optimizer_and_scheduler=make_opt_builder(cfg, spe, arm),
-                train_loader=train_loader, eval_fn=eval_fn,
-                epochs=cfg["epochs"], steps_per_epoch=spe,
-                device=cfg["device"], log_every=cfg["log_every"],
-                out_dir=cfg["out_dir"], seed=seed))
+                if arm == "constant":
+                    name = f"constant_lr{run_cfg['lr_max']:g}"
+                elif lr_over is not None:
+                    name = f"{arm}_lr{run_cfg['lr_max']:g}"
+                if sched_over == "constant" and arm != "C_cosine_only":
+                    name = f"{name}_noanneal"
+                name = f"{name}{suffix}"
+
+                print(f"\n=== {name} | seed {seed} ===")
+                results.append(run_arm(
+                    arm_name=name, make_model=make_model,
+                    make_optimizer_and_scheduler=make_opt_builder(run_cfg, spe,
+                                                                  arm),
+                    train_loader=train_loader, eval_fn=eval_fn,
+                    epochs=run_cfg["epochs"], steps_per_epoch=spe,
+                    device=run_cfg["device"],
+                    log_every=run_cfg["log_every"],
+                    out_dir=run_cfg["out_dir"], seed=seed))
 
     os.makedirs(cfg["out_dir"], exist_ok=True)
     # MERGE with any existing summary rather than overwrite: runs are launched
