@@ -1,0 +1,7 @@
+[
+  {
+    "arms": ["C_cosine_only"],
+    "lr_max": 0.4,
+    "_note": "MEAN-MATCHED annealed control. Cosine from peak 0.4 has mean lr 0.2000 over the run; the triangle (peak 0.8, ratio 1000) has mean 0.2002. This closes the confound that the 2.65x speed claim was measured against a cosine baseline running at half the triangle's average step size. Cosine-only differs from the method in exactly one way: no triangular cycle."
+  }
+]
