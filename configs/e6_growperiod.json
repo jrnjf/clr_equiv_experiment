@@ -1,0 +1,14 @@
+[
+  {
+    "arms": ["G_grow"],
+    "global_schedule": "constant",
+    "seeds": [0],
+    "_note": "CLR only. Triangular cycle with no anneal; the PERIOD grows 1 -> 2 -> 4 -> 8 epochs at epochs 32 / 64 / 128. Tests whether lengthening the cycle substitutes for annealing. Baseline for comparison: B1_noanneal (fixed 1-epoch period, no anneal) capped at 93.63%."
+  },
+  {
+    "arms": ["G_grow"],
+    "global_schedule": "cosine",
+    "seeds": [0],
+    "_note": "Same growing period, but with the cosine anneal. Compare against B1 (fixed 1-epoch period + anneal): peak 95.26%, final 95.19%, 16.7 epochs to 90%."
+  }
+]

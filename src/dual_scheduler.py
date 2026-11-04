@@ -241,3 +241,83 @@ def assert_lambdalr_alignment(steps_per_epoch: int, lr_max: float, lr_SWR: float
     worst = max(abs(a - b) for a, b in zip(produced, expected))
     assert worst <= tol, f"LambdaLR series differs by {worst:.3e} > {tol:.3e}"
     return worst
+
+
+# ---------------------------------------------------------------------------
+# Growing-period triangular cycle
+# ---------------------------------------------------------------------------
+def _tri_fraction(u: float, lr_ratio: float) -> float:
+    """Triangle on u in [0, 1): 1/lr_ratio at u=0, 1 at u=0.5, back down."""
+    u = u % 1.0
+    tri = 2.0 * u if u < 0.5 else 2.0 - 2.0 * u
+    lo = 1.0 / lr_ratio
+    return lo + (1.0 - lo) * tri
+
+
+def piecewise_period_lambda(steps_per_epoch: int, lr_SWR: float,
+                            segments, total_epochs: float,
+                            end_ratio: float = 1e-4,
+                            global_name: str = "constant"):
+    """Triangular cycle whose PERIOD changes over training.
+
+    `segments` is [(start_epoch, period_epochs), ...] sorted by start_epoch, e.g.
+        [(0, 1), (32, 2), (64, 4), (128, 8)]
+    means: a full min->max->min sweep takes 1 epoch for epochs 0-31, 2 epochs for
+    32-63, and so on.
+
+    The phase is ACCUMULATED (phase += 1/period per step) rather than computed as
+    step/period, so the curve stays continuous when the period changes. Computing
+    it directly would make the LR jump at every boundary, which is a different and
+    much more violent schedule than the one intended.
+    """
+    if not segments:
+        raise ValueError("segments must be non-empty")
+    segs = [(int(round(e * steps_per_epoch)), float(per) * steps_per_epoch)
+            for e, per in sorted(segments)]
+    if segs[0][0] != 0:
+        raise ValueError("first segment must start at epoch 0")
+    if lr_SWR < 1.0:
+        raise ValueError("lr_SWR must be >= 1")
+
+    def phase_at(step: int) -> float:
+        phase = 0.0
+        for i, (start, period) in enumerate(segs):
+            nxt = segs[i + 1][0] if i + 1 < len(segs) else None
+            if nxt is None or step < nxt:
+                return phase + max(0, step - start) / period
+            phase += (nxt - start) / period
+        return phase
+
+    def lr_lambda(step: int) -> float:
+        tri = _tri_fraction(phase_at(step), lr_SWR)
+        if global_name in ("cosine", "cos"):
+            g = cosine_anneal(step / float(steps_per_epoch), total_epochs,
+                              end_ratio)
+        elif global_name in ("constant", "none", None):
+            g = 1.0
+        else:
+            raise ValueError(f"unknown global schedule {global_name!r}")
+        return tri * g
+
+    return lr_lambda
+
+
+def build_growing_period(model, steps_per_epoch: int, lr_max: float,
+                         lr_SWR: float, global_name: str, total_epochs: float,
+                         end_ratio: float, weight_decay: float,
+                         momentum: float = 0.0, period_segments=None,
+                         **_ignored):
+    """The method but with a period that lengthens over training."""
+    from torch.optim import SGD
+    from torch.optim.lr_scheduler import LambdaLR
+
+    if period_segments is None:
+        period_segments = [[0, 1], [32, 2], [64, 4], [128, 8]]
+    segments = [(int(e), float(p)) for e, p in period_segments]
+
+    opt = SGD(model.parameters(), lr=lr_max, momentum=momentum,
+              weight_decay=weight_decay)
+    sched = LambdaLR(opt, piecewise_period_lambda(steps_per_epoch, lr_SWR,
+                                                  segments, total_epochs,
+                                                  end_ratio, global_name))
+    return opt, sched

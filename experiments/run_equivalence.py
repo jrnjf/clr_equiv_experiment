@@ -56,12 +56,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from dual_scheduler import (assert_same_lr_series, build_adamw_cosine,
                             build_adamw_dual, build_constant,
-                            build_cosine_only, build_internal, build_method,
+                            build_cosine_only, build_growing_period, build_internal,
+                            build_method,
                             lr_series, train_step)
 from schedules import effective_lr_series
 
 ARMS = ("A_internal", "B1_external_wd_eff", "C_cosine_only", "constant",
-        "AdamW_cosine", "AdamW_dual")
+        "AdamW_cosine", "AdamW_dual", "G_grow")
 
 DEFAULTS = {
     "backend": "tiny",
@@ -122,6 +123,11 @@ def make_opt_builder(cfg, spe, arm):
             return build_cosine_only(model, **common)
         if arm == "constant":
             return build_constant(model, **common)
+        if arm == "G_grow":
+            c = dict(common)
+            c["period_segments"] = cfg.get("period_segments",
+                                           [[0, 1], [32, 2], [64, 4], [128, 8]])
+            return build_growing_period(model, **c)
         if arm == "AdamW_cosine":
             return build_adamw_cosine(model, **common)
         if arm == "AdamW_dual":

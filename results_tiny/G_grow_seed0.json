@@ -1,0 +1,58 @@
+{
+  "n_steps": 96,
+  "first_loss": 2.3099608421325684,
+  "last_loss": 2.0952870845794678,
+  "min_loss": 2.0568480491638184,
+  "n_nonfinite": 0,
+  "status": "trained",
+  "val_history": [
+    {
+      "epoch": 1,
+      "val_loss": 2.2417309284210205,
+      "val_acc": 0.205078125,
+      "wall": 0.040750980377197266
+    },
+    {
+      "epoch": 2,
+      "val_loss": 2.180634021759033,
+      "val_acc": 0.365234375,
+      "wall": 0.07345128059387207
+    },
+    {
+      "epoch": 3,
+      "val_loss": 2.1363285779953003,
+      "val_acc": 0.51953125,
+      "wall": 0.1326768398284912
+    },
+    {
+      "epoch": 4,
+      "val_loss": 2.0991172790527344,
+      "val_acc": 0.6328125,
+      "wall": 0.17326998710632324
+    },
+    {
+      "epoch": 5,
+      "val_loss": 2.0917983055114746,
+      "val_acc": 0.646484375,
+      "wall": 0.20541810989379883
+    },
+    {
+      "epoch": 6,
+      "val_loss": 2.0879396200180054,
+      "val_acc": 0.65234375,
+      "wall": 0.23499512672424316
+    }
+  ],
+  "epoch_to_90": null,
+  "wall_to_90": null,
+  "device": "cpu",
+  "sec_per_epoch": 0.04,
+  "ms_per_step": 2.45,
+  "arm": "G_grow",
+  "seed": 0,
+  "epochs": 6,
+  "steps_per_epoch": 16,
+  "wall_seconds": 0.2,
+  "final_val_acc": 0.65234375,
+  "final_val_loss": 2.0879396200180054
+}
