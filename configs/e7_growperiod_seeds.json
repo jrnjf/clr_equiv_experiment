@@ -1,0 +1,14 @@
+[
+  {
+    "arms": ["G_grow"],
+    "global_schedule": "cosine",
+    "seeds": [0, 1, 2],
+    "_note": "Growing period (1->2->4->8 epochs at 32/64/128) WITH cosine anneal, 3 seeds. Single-seed run reached 93% at ep 44 and 94% at ep 80 versus B1's 53 and 112 (3-seed means). Confirming that 1.2x/1.4x mid-training advantage."
+  },
+  {
+    "arms": ["G_grow"],
+    "global_schedule": "constant",
+    "seeds": [0, 1, 2],
+    "_note": "Growing period, NO anneal, 3 seeds. Single-seed run reached 93% at ep 44 -- matching the annealed arm -- so the period schedule appears to substitute for the anneal in mid-training, while still not reaching 95%."
+  }
+]

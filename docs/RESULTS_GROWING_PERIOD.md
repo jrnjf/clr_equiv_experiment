@@ -17,11 +17,38 @@ Verified: step-to-step LR change at each boundary equals the in-stage change.
 | B1_noanneal fixed period, no anneal | 0.9409 | 0.9356 | 18 |
 | **G_grow_noanneal growing period, no anneal** | 0.9474 | **0.9471** | **16** |
 
-## Finding 1: with annealing, the period schedule does nothing
+## Finding 1: the effect is in the 93-94% band, not at 90%
 
-G_grow + anneal (0.9520, 17 ep) is indistinguishable from B1's fixed period
-(0.9519, 16.7 ep, 3 seeds). Once the LR anneals, *how fast it cycles* is
-irrelevant to final accuracy. Clean negative result.
+An earlier version of this note claimed the period schedule "does nothing" with an
+anneal. That was wrong: it was based on t@90 and final accuracy, both of which are
+blind to the effect. The curves are identical at 90% and converge at the end; the
+difference lives in the middle.
+
+| arm | n | t@90 | t@93 | t@94 | t@95 |
+|---|---|---|---|---|---|
+| B1 fixed 1-ep + anneal | 3 | 17 | 53 | 112 | 168 |
+| **G_grow 1->2->4->8 + anneal** | 1 | 17 | **44** | **80** | 172 |
+| B1_noanneal fixed, no anneal | 3 | 17 | 63 | 175 | never |
+| **G_grow_noanneal growing, no anneal** | 1 | 16 | **44** | **88** | never |
+
+* t@93: 44 vs 53 -> 1.2x faster than the fixed period
+* t@94: 80 vs 112 -> 1.4x faster
+* t@90: tie (17 vs 17); t@95: slightly worse (172 vs 168)
+* final accuracy: tie (0.9520 vs 0.9519)
+
+Fixed-period B1 spends 59 epochs going from 93% to 94% (53 -> 112); G_grow spends
+36 (44 -> 80). That is where the period schedule earns its keep.
+
+Is it noise? B1's per-seed t@93 is 57/57/46 (mean 53, sd 6.4) and t@94 is
+113/104/119 (mean 112, sd 7.5). G_grow's 44 and 80 sit 1.4 and 4.3 sd away. At n=1
+that is not a formal test, but it is far outside seed variation -- hence the 3-seed
+confirmation run (configs/e7_growperiod_seeds.json).
+
+## Finding 1b: the period schedule substitutes for the anneal in mid-training
+
+G_grow_noanneal reaches 93% at epoch 44 -- identical to the annealed G_grow -- so
+during mid-training the growing period does the same job as annealing. It still
+cannot reach 95% (never), so an anneal remains necessary for the final level.
 
 ## Finding 2: without annealing, growing the period helps — but for an unknown reason
 
