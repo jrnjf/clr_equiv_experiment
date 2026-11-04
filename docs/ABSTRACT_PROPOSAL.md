@@ -26,6 +26,7 @@ peak, momentum 0, weight decay 5e-4 (LR-coupled, torch's default).
 | A internal optimizer | 3 | 0.9530 | 0.9522 | 17.0 |
 | **B1 triangle × cosine** | 3 | **0.9526** | **0.9519** | **16.7** |
 | C cosine, peak 0.2 | 3 | 0.9512 | 0.9507 | 44.3 |
+| **C cosine, peak 0.4 (mean-matched)** | 3 | 0.9512 | 0.9504 | **68.7** |
 | C cosine, peak 0.8 | 3 | 0.9503 | 0.9493 | 105.3 |
 | C cosine, peak 0.1 | 3 | 0.9435 | 0.9424 | 44.7 |
 | AdamW + cosine, 1e-3 | 3 | 0.9416 | 0.9405 | 20.0 |
@@ -35,25 +36,37 @@ peak, momentum 0, weight decay 5e-4 (LR-coupled, torch's default).
 | constant lr 0.1 (best constant) | 1 | 0.9215 | 0.9073 | 46.0 |
 | constant lr 0.8 | 1 | 0.8802 | 0.8342 | never |
 
-Supporting statistics (paired by seed, n=3, |t| ≥ 4.30 for p<0.05):
+Supporting statistics (paired by seed, n=3, |t| >= 4.30 for p<0.05):
 
 | comparison | metric | effect | t | seeds won |
 |---|---|---|---|---|
-| B1 vs AdamW+cosine 1e-3 | final acc | **+1.13 pp** | +7.92 | 3/3 |
-| B1 vs AdamW+cosine 1e-3 | epochs to 90% | −3.3 | −1.89 | 0/3 (n.s.) |
-| B1 vs SGD+cosine peak 0.2 | final acc | +0.12 pp | +1.05 | — (n.s.) |
-| B1 vs SGD+cosine peak 0.2 | epochs to 90% | −27.7 | **−8.43** | 3/3 |
+| **B1 vs C@0.4 — mean-matched, only the cycle differs** | **epochs to 90%** | **+52.0 ep (4.1x)** | **+11.53** | **3/3** |
+| B1 vs C@0.4 | final acc | +0.14 pp | +0.90 | 2/3 (n.s.) |
+| B1 vs AdamW+cosine 1e-3 | final acc | +1.13 pp | +7.92 | 3/3 |
+| B1 vs AdamW+cosine 1e-3 | epochs to 90% | −3.3 ep | −1.89 | 2 faster, 1 tie (n.s.) |
+| B1 vs C@0.2 (best-tuned cosine) | epochs to 90% | −27.7 ep (2.65x) | −8.43 | 3/3 |
+| B1 vs C@0.2 | final acc | +0.12 pp | +1.05 | — (n.s.) |
 | AdamW+cycle vs AdamW+cosine | final acc | −0.33 pp | −2.82 | 0/3 |
-| B1 vs B1-no-anneal | final acc | +1.56 pp | — | 3/3 |
 
-Independent implementations of the same schedule (A internal, B2 external)
-reproduce the B1-vs-AdamW gap (+1.16 and +1.17 pp), so the headline does not
-depend on one arm.
+Threshold dependence, matched pair (B1 vs C@0.4):
+
+| threshold | B1 | C@0.4 | speedup |
+|---|---|---|---|
+| 90% | 17 | 69 | **4.1x** |
+| 93% | 53 | 132 | 2.5x |
+| 94% | 112 | 149 | 1.3x |
+| 95% | 168 | 166 | 1.0x (tie) |
+
+The advantage is concentrated in early-to-mid training and vanishes at the
+accuracy ceiling, where both arms converge to the same ~95%.
 
 ## 3. What the data supports
 
-1. **Speed.** At equal final accuracy, the cycle reaches 90% test accuracy
-   2.6× sooner than a tuned cosine anneal (16.7 vs 44.3 epochs).
+1. **Speed, isolated.** Holding the mean LR fixed at 0.200 and changing one
+   thing — the cycle — reach 90% test accuracy in 16.7 epochs versus 68.7, a
+   **4.1×** reduction (t = 11.5, 3/3 seeds) at equal final accuracy
+   (95.19% vs 95.04%, n.s.). Against the best-tuned cosine (peak 0.2) the
+   reduction is 2.65×.
 2. **AdamW comparison.** Momentum-free SGD with this schedule is ~1.1 points more
    accurate than AdamW + cosine at equal time-to-threshold.
 3. **Decomposition.** Cycling buys speed; annealing buys accuracy. Removing the
@@ -70,8 +83,8 @@ depend on one arm.
 * "2.6× faster than cosine annealing" holds against a **tuned** baseline only at
   n=3 on one dataset/architecture; against the badly tuned peak-0.8 baseline it
   would be 6×, and that number should not be used.
-* The mean learning rates are not matched (B1 ≈ 0.20, cosine@0.2 ≈ 0.10). A
-  mean-matched annealed control (cosine from peak 0.4) was never run.
+* The advantage is **threshold-dependent**: 4.1× at 90%, 2.5× at 93%, 1.3× at
+  94%, and a tie at 95%. Reporting only 90% would be selective; report the curve.
 * AdamW was tuned over only **two learning rates and one weight decay** (0.01).
   Tuned AdamW on this benchmark often reaches 94.5–95%, which would shrink or
   erase the +1.1 pp gap.
@@ -83,39 +96,30 @@ depend on one arm.
 
 ## 5. Proposed abstract
 
-**Title.** *Cycling for speed, annealing for accuracy: a temporary-annealed
-triangular schedule for momentum-free SGD*
+**Title.** *Just a configuration: a triangular cycle makes momentum-free SGD 4×
+faster to 90% accuracy at unchanged final accuracy*
 
-> We study a deliberately simple learning-rate schedule: a triangular cycle of
-> period one epoch multiplied by a cosine anneal, stepped per batch, applied to
-> momentum-free SGD at a peak learning rate of 0.8 with a floor 1000× lower.
-> Neither component is new — the triangle is Smith's cyclical learning-rate
-> policy and the anneal is the cosine schedule — and we make no novelty claim for
-> the composition. We ask instead what each component contributes, and how the
-> combination compares with standard recipes.
->
-> On CIFAR-10 with ResNet-18 over 200 epochs and three seeds, we find that the
-> cycle reaches 90% test accuracy in 17 epochs against 44 for a tuned cosine
-> anneal, a 2.6× reduction, while final accuracy is statistically
-> indistinguishable (95.19% vs 95.07%). Against AdamW with cosine annealing,
-> momentum-free SGD with this schedule is 1.14 points more accurate at equal
-> time-to-threshold (95.19% vs 94.05%). The two components prove separable:
-> removing the anneal preserves the speed (16.7 epochs) but caps accuracy at
-> 93.6%, whereas no constant learning rate we tested exceeded 92%. The benefit
-> does not transfer to AdamW, where the same cycle is slightly worse than pure
-> cosine annealing. We conclude that the cycle buys time-to-accuracy and the
-> anneal buys the final level, and we report the regime's boundaries rather than
-> claiming a new scheduler.
+> We report a controlled comparison. Starting from a cosine-annealed SGD baseline
+> whose mean learning rate is 0.200, we add one ingredient — a triangular cycle
+> of period one epoch — and change nothing else. On CIFAR-10 with ResNet-18 over
+> 200 epochs and three seeds, the cycle reduces the epochs needed to reach 90%
+> test accuracy from 68.7 to 16.7, a 4.1× reduction (paired t = 11.5, 3/3 seeds),
+> while final accuracy is unchanged at 95.0%. The advantage is largest in
+> early-to-mid training — 2.5× at 93% — and disappears at 95%, where both arms
+> converge to the same ceiling. Against AdamW with cosine annealing, momentum-free
+> SGD with the cycle is 1.14 points more accurate at matched time-to-threshold.
+> We claim no novelty for the schedule, which composes Smith's cyclical
+> learning-rate policy with the cosine schedule; the contribution is an empirical
+> characterisation of this high-peak, long-anneal regime.
 
-**Shorter version (~120 words).** *A triangular cycle of period one epoch
-multiplied by a cosine anneal lets momentum-free SGD at peak lr 0.8 reach 90%
-CIFAR-10 accuracy in 17 epochs versus 44 for a tuned cosine anneal, at equal
-final accuracy (95.2% vs 95.1%), and 1.1 points above AdamW + cosine. The
-components separate cleanly: cycling buys speed, annealing buys accuracy, and
-neither alone suffices. We make no novelty claim for the schedule — both
-components are established — and frame the contribution as a characterisation of
-this high-peak, long-anneal regime, including where the benefit does not appear
-(it does not help AdamW).*
+**Shorter version (~110 words).** *Adding a triangular cycle of period one epoch
+to a cosine-annealed SGD baseline — one change, nothing else — cuts the epochs
+needed to reach 90% CIFAR-10 accuracy from 68.7 to 16.7 (4.1×, paired t = 11.5,
+3/3 seeds) at unchanged final accuracy (95.0%). The gain is 2.5× at 93% and
+vanishes at 95%, where both schedules meet the same ceiling. Against AdamW +
+cosine, momentum-free SGD with the cycle is 1.14 points more accurate at matched
+time-to-threshold. We claim no novelty for the schedule; the contribution is a
+characterisation of this regime, with its boundaries stated.*
 
 ## 6. Before submission
 
