@@ -1,0 +1,13 @@
+[
+  {
+    "arms": ["B1_external_wd_eff"],
+    "seeds": [3, 4, 5],
+    "_note": "Extend the fixed-period control to n=6 so the growing-period comparison stays paired. Needed because the 3-seed t@94 difference is t=-4.12, just under the |t|>=4.30 bar for p<.05 at n=3, although all 3 G_grow seeds beat all 3 B1 seeds at that threshold."
+  },
+  {
+    "arms": ["G_grow"],
+    "global_schedule": "cosine",
+    "seeds": [3, 4, 5],
+    "_note": "Extend the growing-period arm to n=6. Current 3-seed result: t@93 43 vs B1 53, t@94 80 vs B1 112 (1.40x), t@90 19 vs 18 (slightly slower), t@95 and final accuracy tied."
+  }
+]

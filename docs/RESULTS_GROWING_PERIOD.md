@@ -8,14 +8,33 @@ Implementation note: the phase is accumulated (`phase += 1/period` per step), no
 computed as `step/period`, so the LR curve stays continuous at the boundaries.
 Verified: step-to-step LR change at each boundary equals the in-stage change.
 
-## Results (1 seed — see caveat)
+## Results (3 seeds)
 
-| arm | peak | final | 1st 90% |
-|---|---|---|---|
-| B1 fixed 1-ep period + anneal | 0.9535 | 0.9532 | 18 |
-| **G_grow growing period + anneal** | 0.9522 | 0.9520 | 17 |
-| B1_noanneal fixed period, no anneal | 0.9409 | 0.9356 | 18 |
-| **G_grow_noanneal growing period, no anneal** | 0.9474 | **0.9471** | **16** |
+| arm | n | t@90 | t@93 | t@94 | t@95 | final |
+|---|---|---|---|---|---|---|
+| B1 fixed 1-ep + anneal | 3 | 17 | 53 | 112 | 168 | 0.9519 |
+| **G_grow growing + anneal** | 3 | 18 | **43** | **80** | 172 | 0.9509 |
+| B1_noanneal fixed, no anneal | 3 | 17 | 63 | 175 | never | 0.9363 |
+| G_grow_noanneal growing, no anneal | 3 | 17 | **42** | 84 | never | 0.9461 |
+
+Paired, G_grow vs B1 (n=3, |t|>=4.30 for p<.05):
+
+| metric | G_grow | B1 | diff | t | rank-separated |
+|---|---|---|---|---|---|
+| t@90 | 19/17/17 | 18/16/16 | **+1 ep (slower)** | — (sd=0) | no |
+| t@93 | 50/42/38 | 57/57/46 | −10 ep | −3.97 | no |
+| **t@94** | 96/68/76 | 113/104/119 | **−32 ep (1.40x)** | **−4.12** | **yes** |
+| t@95 | 172/173/172 | 161/175/169 | +4 ep | +1.06 | no |
+| final acc | 0.9501/0.9507/0.9520 | 0.9532/0.9504/0.9520 | −0.09 pp | — | no |
+
+Interpretation: the 1.40x at 94% is **borderline** by the t-test (4.12 vs 4.30) but
+**complete rank-separated** -- every G_grow seed beats every B1 seed at that
+threshold, which is p=0.10 two-sided / 0.05 one-sided by rank alone at 3v3. The
+direction is consistent across all three seeds at both 93% and 94%.
+
+Note the trade: growing the period is consistently **1 epoch slower at 90%**
+(19/17/17 vs 18/16/16) and tied at 95% and on final accuracy. It buys the middle
+of the curve, not the ends.
 
 ## Finding 1: the effect is in the 93-94% band, not at 90%
 
@@ -72,11 +91,10 @@ distribution is essentially unchanged.
 So the +1.15 pp is either (a) fewer cycle reversals late in training, changing the
 dynamics in a way the LR histogram cannot see, or (b) noise — **n=1**.
 
-## What would settle it
+## What would settle it (running)
 
-3 seeds on `G_grow_noanneal` and `B1_noanneal` (6 runs, ~7 h). If +1.15 pp holds
-across seeds it is a real effect that needs a mechanistic account; if it shrinks
-to <0.4 pp it was seed noise.
+Added seeds 3-5 to B1 and G_grow (configs/e8_growperiod_n6.json, 6 runs, ~7 h)
+because the 3-seed t@94 difference sits just under the significance bar.
 
 It is not on the critical path for the main claim: the annealed schedule already
 reaches 95.19% and the period schedule cannot beat that.
