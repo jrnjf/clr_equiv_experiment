@@ -105,6 +105,14 @@ def _build_tiny(cfg):
 # one out of train both discards training data and changes steps_per_epoch,
 # which in turn changes the triangular period (the schedule depends on it).
 def _build_cifar(cfg):
+    return _build_cifar_like(cfg, dataset="CIFAR10", num_classes=10)
+
+
+def _build_cifar100(cfg):
+    return _build_cifar_like(cfg, dataset="CIFAR100", num_classes=100)
+
+
+def _build_cifar_like(cfg, dataset="CIFAR10", num_classes=10):
     import torch
     import torch.nn as nn
     from torch.utils.data import DataLoader
@@ -124,8 +132,9 @@ def _build_cifar(cfg):
                                   transforms.Normalize(mean, std)])
 
     root = cfg["data_root"]
-    train_set = datasets.CIFAR10(root, train=True, download=True, transform=train_tf)
-    test_set = datasets.CIFAR10(root, train=False, download=True, transform=eval_tf)
+    ds = getattr(datasets, dataset)
+    train_set = ds(root, train=True, download=True, transform=train_tf)
+    test_set = ds(root, train=False, download=True, transform=eval_tf)
 
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
@@ -154,7 +163,7 @@ def _build_cifar(cfg):
         )
 
     def make_model():
-        m = resnet18(num_classes=10)
+        m = resnet18(num_classes=num_classes)
         m.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
         m.maxpool = nn.Identity()
         return m
@@ -209,8 +218,9 @@ def _build_cifar_bench(cfg):
                                   transforms.Normalize(mean, std)])
 
     root = cfg["data_root"]
-    train_set = datasets.CIFAR10(root, train=True, download=True, transform=train_tf)
-    test_set = datasets.CIFAR10(root, train=False, download=True, transform=eval_tf)
+    ds = getattr(datasets, dataset)
+    train_set = ds(root, train=True, download=True, transform=train_tf)
+    test_set = ds(root, train=False, download=True, transform=eval_tf)
 
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
@@ -261,7 +271,9 @@ def build(cfg):
         return _build_tiny(cfg)
     if name == "cifar":
         return _build_cifar(cfg)
+    if name == "cifar100":
+        return _build_cifar100(cfg)
     if name == "cifar_bench":
         return _build_cifar_bench(cfg)
     raise SystemExit(f"unknown backend: {name!r} "
-                     f"(expected 'tiny', 'cifar' or 'cifar_bench')")
+                     f"(expected 'tiny', 'cifar', 'cifar100' or 'cifar_bench')")

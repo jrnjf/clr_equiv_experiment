@@ -1,0 +1,8 @@
+[
+  { "arms": ["B1_external_wd_eff"], "epochs": 40,  "seeds": [1,2], "_note": "seed 0 already exists; these extend the budget-matched table to n=3" },
+  { "arms": ["B1_external_wd_eff"], "epochs": 80,  "seeds": [1,2] },
+  { "arms": ["B1_external_wd_eff"], "epochs": 160, "seeds": [1,2] },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "epochs": 40,  "seeds": [1,2] },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "epochs": 80,  "seeds": [1,2] },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "epochs": 160, "seeds": [1,2] }
+]

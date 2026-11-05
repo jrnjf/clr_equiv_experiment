@@ -1,0 +1,7 @@
+[
+  { "arms": ["B1_external_wd_eff"], "suffix": "_c100", "seeds": [0,1,2],
+    "_note": "CIFAR-100 second setting. The _c100 suffix is essential: without it summarize_all would merge these with the CIFAR-10 runs of the same arm name and the newest file would silently win." },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "suffix": "_c100", "seeds": [0,1,2] },
+  { "arms": ["C_cosine_only"], "lr_max": 0.4, "suffix": "_c100", "seeds": [0,1,2] },
+  { "arms": ["AdamW_cosine"], "lr_max": 0.001, "weight_decay": 0.01, "suffix": "_c100", "seeds": [0,1,2] }
+]

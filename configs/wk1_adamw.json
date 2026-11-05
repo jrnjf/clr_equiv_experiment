@@ -1,0 +1,7 @@
+[
+  { "arms": ["AdamW_cosine"], "lr_max": 0.001, "weight_decay": 0.01, "seeds": [0,1,2],
+    "_note": "AdamW lr 1e-3 wd 0.01 -- the config used so far (94.05%). This grid exists to test the reviewer objection that AdamW was undertuned." },
+  { "arms": ["AdamW_cosine"], "lr_max": 0.001, "weight_decay": 0.05, "seeds": [0,1,2] },
+  { "arms": ["AdamW_cosine"], "lr_max": 0.002, "weight_decay": 0.01, "seeds": [0,1,2] },
+  { "arms": ["AdamW_cosine"], "lr_max": 0.002, "weight_decay": 0.05, "seeds": [0,1,2] }
+]

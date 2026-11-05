@@ -1,0 +1,20 @@
+{
+  "backend": "cifar100",
+  "data_root": "data",
+  "batch_size": 128,
+  "epochs": 200,
+  "lr_max": 0.8,
+  "lr_SWR": 1000.0,
+  "global_schedule": "cosine",
+  "end_ratio": 1e-4,
+  "weight_decay": 5e-4,
+  "momentum": 0.0,
+  "log_every": 50,
+  "seeds": [0, 1, 2],
+  "device": "cuda",
+  "num_workers": 8,
+  "out_dir": "results_cifar100",
+  "mean": [0.5071, 0.4867, 0.4408],
+  "std": [0.2675, 0.2565, 0.2761],
+  "_comment": "CIFAR-100 second setting. Same protocol as cifar.json (200 epochs, batch 128 -> 390 steps, full 50k train, eval on 10k test). Separate out_dir so it cannot mix with CIFAR-10 results."
+}
