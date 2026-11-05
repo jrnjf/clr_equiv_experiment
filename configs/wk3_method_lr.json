@@ -1,0 +1,6 @@
+[
+  { "arms": ["B1_external_wd_eff"], "lr_max": 0.4, "seeds": [0,1,2],
+    "_note": "SENSITIVITY: the method has only ever been run at peak 0.8, chosen not tuned. Baselines got 2-4 configurations each, so a reviewer will ask why the method got one. This is also the direct test of the paper's title: if the result is flat across peak lr, it really is 'just a configuration'." },
+  { "arms": ["B1_external_wd_eff"], "lr_max": 1.2, "seeds": [0,1,2],
+    "_note": "Higher peak: tests robustness upward and whether 0.8 was leaving performance on the table." }
+]

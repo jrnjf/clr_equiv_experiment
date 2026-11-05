@@ -176,6 +176,30 @@ def build_adamw_dual(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
     return opt, sched
 
 
+def build_step_decay(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
+                     global_name: str, total_epochs: float, end_ratio: float,
+                     weight_decay: float, momentum: float = 0.0,
+                     milestones=(0.5, 0.75), gamma: float = 0.1, **_ignored):
+    """Classic step decay: lr x gamma at each fraction of the budget.
+
+    The pre-cosine CIFAR recipe. It has never been in this project's baseline set,
+    which is conspicuous: it is the recipe that reached ~95% before cosine
+    annealing, so leaving it out invites "you only compared against schedules
+    that happen to be weak here".
+    """
+    from torch.optim import SGD
+    from torch.optim.lr_scheduler import LambdaLR
+
+    def f(step):
+        epoch = step / float(steps_per_epoch)
+        drops = sum(1 for m in milestones if epoch >= m * total_epochs)
+        return gamma ** drops
+
+    opt = SGD(model.parameters(), lr=lr_max, momentum=momentum,
+              weight_decay=weight_decay)
+    return opt, LambdaLR(opt, f)
+
+
 def build_internal(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                    global_name: str, total_epochs: float, end_ratio: float,
                    weight_decay: float, wd_on_effective_lr: bool = True,

@@ -1,0 +1,4 @@
+[
+  { "arms": ["D_step"], "lr_max": 0.1, "momentum": 0.9, "seeds": [0,1,2],
+    "_note": "Classic step decay (x0.1 at 50% and 75% of budget), SGD momentum 0.9, lr 0.1 -- the standard pre-cosine CIFAR recipe. Missing baseline." }
+]
