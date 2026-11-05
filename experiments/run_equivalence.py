@@ -251,6 +251,12 @@ def main(argv=None):
                     help="JSON list of run specs, each a dict of per-run "
                          "overrides {arms, suffix, lr_max, global_schedule, "
                          "seeds, ...}; runs them all in one invocation")
+    ap.add_argument("--epochs", type=int, default=None,
+                    help="override cfg['epochs'] (budget-matched comparison: the "
+                         "anneal horizon follows the budget)")
+    ap.add_argument("--phase-offset", type=int, default=None,
+                    help="shift the cycle within the epoch (steps); use "
+                         "steps_per_epoch//2 to evaluate at the LR peak")
     ap.add_argument("--global-schedule", default=None,
                     help="override cfg['global_schedule'] ('cosine' or "
                          "'constant' to switch annealing off)")
@@ -270,6 +276,10 @@ def main(argv=None):
         cfg["lr_max"] = args.lr_max
     if args.global_schedule is not None:
         cfg["global_schedule"] = args.global_schedule
+    if args.epochs is not None:
+        cfg["epochs"] = args.epochs
+    if args.phase_offset is not None:
+        cfg["phase_offset"] = args.phase_offset
 
     if args.dry_run:
         return dry_run(cfg, allow_odd=args.allow_odd)
@@ -321,6 +331,10 @@ def main(argv=None):
                     name = f"{arm}_lr{run_cfg['lr_max']:g}"
                 if sched_over == "constant" and arm != "C_cosine_only":
                     name = f"{name}_noanneal"
+                if run_cfg.get("phase_offset"):
+                    name = f"{name}_phase{run_cfg['phase_offset']}"
+                if run_cfg["epochs"] != cfg["epochs"]:
+                    name = f"{name}_ep{run_cfg['epochs']}"
                 name = f"{name}{suffix}"
 
                 print(f"\n=== {name} | seed {seed} ===")

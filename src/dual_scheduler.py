@@ -38,16 +38,23 @@ from schedules import cosine_anneal, triangle_wave
 
 def dual_schedule_lambda(steps_per_epoch: int, lr_max: float, lr_SWR: float,
                          total_epochs: float, end_ratio: float = 1e-4,
-                         global_name: str = "cosine"):
-    """Return f(step) -> LR multiplier for LambdaLR."""
+                         global_name: str = "cosine", phase_offset: int = 0):
+    """Return f(step) -> LR multiplier for LambdaLR.
+
+    `phase_offset` (in steps) shifts the triangle within the epoch. With the
+    default 0 the LR is at its trough at every epoch boundary, which is exactly
+    when validation runs -- so the model is always measured at its most stable
+    phase. A half-epoch offset moves evaluation to the LR peak, which is how we
+    test whether a reported speed-up is real or an evaluation-phase artifact.
+    """
     if lr_SWR < 1.0:
         raise ValueError("lr_SWR must be >= 1")
     if steps_per_epoch < 2:
         raise ValueError("steps_per_epoch must be >= 2")
 
     def lr_lambda(step: int) -> float:
-        local = triangle_wave(step % steps_per_epoch, steps_per_epoch,
-                              1.0, 1.0 / lr_SWR)
+        local = triangle_wave((step + phase_offset) % steps_per_epoch,
+                              steps_per_epoch, 1.0, 1.0 / lr_SWR)
         if global_name in ("cosine", "cos"):
             g = cosine_anneal(step / float(steps_per_epoch), total_epochs,
                               end_ratio)
@@ -88,7 +95,7 @@ def train_step(opt, sched, loss=None):
 def build_method(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                  global_name: str, total_epochs: float, end_ratio: float,
                  weight_decay: float, momentum: float = 0.0,
-                 **_ignored):
+                 phase_offset: int = 0, **_ignored):
     """The method: stock SGD + LambdaLR. Nothing custom."""
     from torch.optim import SGD
     from torch.optim.lr_scheduler import LambdaLR
@@ -97,7 +104,7 @@ def build_method(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
               weight_decay=weight_decay)
     sched = LambdaLR(opt, dual_schedule_lambda(steps_per_epoch, lr_max, lr_SWR,
                                                total_epochs, end_ratio,
-                                               global_name))
+                                               global_name, phase_offset))
     return opt, sched
 
 

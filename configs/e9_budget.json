@@ -1,0 +1,10 @@
+[
+  { "arms": ["B1_external_wd_eff"], "epochs": 40,  "seeds": [0],
+    "_note": "BUDGET-MATCHED: anneal horizon follows the budget, so this is the honest test of the reviewer objection ('just anneal over 80 epochs and you get there too'). Triangle period stays 1 epoch throughout." },
+  { "arms": ["B1_external_wd_eff"], "epochs": 80,  "seeds": [0] },
+  { "arms": ["B1_external_wd_eff"], "epochs": 160, "seeds": [0] },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "epochs": 40,  "seeds": [0],
+    "_note": "Tuned cosine anneal with T_max = budget. At budget 200 this arm reaches 90% at ep 44 and 94% at ep 134; if scaling the horizon to the budget closes the gap, the 4.1x was an artifact of holding T_max at 200." },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "epochs": 80,  "seeds": [0] },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "epochs": 160, "seeds": [0] }
+]
