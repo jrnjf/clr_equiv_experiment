@@ -389,4 +389,15 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # Line-buffer stdout. When this script's output is piped through tee/grep (as
+    # the weekend runbook does) Python block-buffers it in 8 KB chunks, so a
+    # 200-epoch run shows nothing for ~39 minutes and looks hung. Setting it here
+    # covers every print in the process, including ones added later -- patching
+    # individual print(flush=True) calls is what let this recur.
+    import sys as _sys
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
     raise SystemExit(main())
