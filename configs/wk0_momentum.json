@@ -1,0 +1,8 @@
+[
+  { "arms": ["C_cosine_only"], "lr_max": 0.1, "momentum": 0.9, "seeds": [0,1,2],
+    "_note": "THE STANDARD CIFAR RECIPE that every baseline in this project has been missing: SGD momentum 0.9, lr 0.1, cosine anneal. If this reaches 90% quickly the 4.1x claim is measured against a weak, momentum-free baseline." },
+  { "arms": ["C_cosine_only"], "lr_max": 0.2, "momentum": 0.9, "seeds": [0,1,2],
+    "_note": "Same, higher peak lr -- momentum tolerates a larger step, so this is the more dangerous baseline." },
+  { "arms": ["B1_external_wd_eff"], "momentum": 0.9, "seeds": [0,1,2],
+    "_note": "Does the method survive momentum? If B1+momentum beats B1, the paper should use it and the claim gets stronger. If it breaks, 'momentum-free' is a real limitation to state." }
+]

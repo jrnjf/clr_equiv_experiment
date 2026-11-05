@@ -317,6 +317,7 @@ def main(argv=None):
         # remember what this spec overrode, for arm naming
         lr_over = spec.get("lr_max")
         wd_over = spec.get("weight_decay")
+        mom_over = spec.get("momentum")
         sched_over = spec.get("global_schedule")
 
         print(f"\n--- spec: arms={arms} lr_max={run_cfg['lr_max']:g} "
@@ -332,6 +333,8 @@ def main(argv=None):
                     name = f"{arm}_lr{run_cfg['lr_max']:g}"
                 if wd_over is not None:
                     name = f"{name}_wd{wd_over:g}"
+                if mom_over is not None:
+                    name = f"{name}_mom{mom_over:g}"
                 if sched_over == "constant" and arm != "C_cosine_only":
                     name = f"{name}_noanneal"
                 if run_cfg.get("phase_offset"):

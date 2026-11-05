@@ -16,10 +16,11 @@ mkdir -p "$OUT"
 
 # name | config | sweep | expected hours | what it decides
 BATTERIES=(
+  "0_momentum|cifar|configs/wk0_momentum.json|7|THE STANDARD RECIPE we never ran: SGD momentum 0.9 -- can shrink the 4.1x"
   "1_adamw|cifar|configs/wk1_adamw.json|13|blocks the '+1.1pp over AdamW' claim"
   "2_cifar100|cifar100|configs/wk2_cifar100.json|13|blocks main-track submission"
   "3_budget_seeds|cifar|configs/wk3_budget_seeds.json|6|turns the budget peak gap into a tested claim"
-  "4_headline_seeds|cifar|configs/wk4_headline_seeds.json|4|headline arms to n=5"
+  "4_headline_seeds|cifar|configs/wk4_headline_seeds.json|4|headline arms to n=5 (optional if short on time)"
 )
 
 if [ "${1:-}" = "--list" ]; then
