@@ -121,3 +121,35 @@ which is the regime a practitioner with a compute limit is actually in.
   to be re-tuned per budget (a higher peak may suit a 40-epoch run).
 * Until those are run, the budget table supports the direction but not the
   significance of the peak claim.
+
+---
+
+# Threat 3 (self-inflicted): the method's own learning rate is untuned
+
+Correcting a mistake made while planning the weekend. The method has only ever run
+at peak lr 0.8, inherited from earlier work; every baseline got 2-4 configurations.
+
+**This is a tuning asymmetry, not evidence that the method is fragile.** A schedule
+whose accuracy peaks at some learning rate and falls off either side is normal --
+that is true of SGD no matter which schedule it follows, and of AdamW, and of every
+optimizer ever published. AdamW at lr 5e-4 performing below AdamW at lr 1e-3 does
+not indict AdamW.
+
+What a sensitivity sweep at peak lr {0.4, 0.8, 1.2} establishes:
+
+| outcome | interpretation |
+|---|---|
+| similar performance | supports the title's claim that the result is configuration-robust |
+| 0.4 / 1.2 worse | 0.8 is the right lr, as tuning would establish; report it, nothing is wrong |
+| 0.4 / 1.2 better | the reported result improves |
+
+"Just a configuration" is a claim about the *configuration space*. It can be false
+while the result stands -- then you drop the title's implication, not the paper.
+
+## The real methodological issue: tuning on the test split
+
+All arms are tuned on the CIFAR-10 test split: cosine over peaks {0.1, 0.2, 0.4,
+0.8}, AdamW over lr x wd, and (from battery 3) the method over {0.4, 0.8, 1.2}.
+Standard practice is to tune on a validation split and report on test. The
+asymmetry is *symmetric* here, so no arm is advantaged, but the paper should either
+carve out a validation split or state the practice explicitly.
