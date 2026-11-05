@@ -249,6 +249,10 @@ def main(argv=None):
                     help="override cfg['out_dir'] (keeps runs separated)")
     ap.add_argument("--lr-max", type=float, default=None,
                     help="override cfg['lr_max'] (for a constant-LR sweep)")
+    ap.add_argument("--skip-existing", action="store_true",
+                    help="skip a run whose <arm>_seed<N>.json already exists "
+                         "(resumable runbooks; safe because the arm name "
+                         "encodes every configuration knob)")
     ap.add_argument("--sweep", default=None,
                     help="JSON list of run specs, each a dict of per-run "
                          "overrides {arms, suffix, lr_max, global_schedule, "
@@ -345,7 +349,13 @@ def main(argv=None):
                     name = f"{name}_ep{run_cfg['epochs']}"
                 name = f"{name}{suffix}"
 
-                print(f"\n=== {name} | seed {seed} ===")
+                done = os.path.join(run_cfg["out_dir"], f"{name}_seed{seed}.json")
+                if args.skip_existing and os.path.exists(done):
+                    print(f"\n=== {name} | seed {seed} --- SKIP (exists)")
+                    results.append(json.load(open(done)))
+                    continue
+
+                print(f"\n=== {name} | seed {seed} ===", flush=True)
                 results.append(run_arm(
                     arm_name=name, make_model=make_model,
                     make_optimizer_and_scheduler=make_opt_builder(run_cfg, spe,

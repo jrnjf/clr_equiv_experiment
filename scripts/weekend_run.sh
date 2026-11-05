@@ -53,11 +53,13 @@ for b in "${BATTERIES[@]}"; do
   fi
   log="$OUT/$name.log"
   echo "=== [$(date +%H:%M)] START $name  ($why)"
+  echo "    (progress streams below; also logged to $log)"
   "$PY" experiments/run_equivalence.py --config "configs/$cfg.json" \
-      --sweep "$sweep" >"$log" 2>&1
-  rc=$?
+      --sweep "$sweep" --skip-existing 2>&1 | tee -a "$log" \
+      | grep -E '^===|^---|epoch [0-9]+/' || true
+  rc=${PIPESTATUS[0]}
   if [ $rc -eq 0 ]; then
-    echo "=== [$(date +%H:%M)] DONE  $name  ($(grep -c '^===' "$log" || true) runs)"
+    echo "=== [$(date +%H:%M)] DONE  $name  ($(grep -c '^===' "$log" || true) run headers)"
   else
     echo "=== [$(date +%H:%M)] FAILED $name (exit $rc) -- see $log; continuing"
     tail -5 "$log"
