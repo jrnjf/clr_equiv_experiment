@@ -59,8 +59,9 @@ Paired B1 vs the mean-matched baseline:
 
 1. **The speed advantage replicates and strengthens**: 5.5x at 65% and 5.3x at 70%,
    all three seeds, against the same mean-matched control as CIFAR-10.
-2. **The accuracy tie also replicates**: -0.20 pp, n.s. The mean-matched cosine is
-   marginally ahead, so there is no final-accuracy claim on either dataset.
+2. **The accuracy tie also replicates**: -0.20 pp, t=-1.48, n.s. -- a statistical
+   tie, not a loss. The point estimate sits behind the cosine baseline, but see the
+   loss/accuracy divergence below: B1 is significantly better on cross-entropy.
 3. **The threshold dependence replicates**: by 75% the two arms are identical
    (131 vs 130 epochs). The advantage lives in early-to-mid training on both
    datasets, which makes it a property of the schedule rather than of one
@@ -84,3 +85,42 @@ Paired B1 vs the mean-matched baseline:
 3. **CIFAR-100 AdamW at the best config** (3 runs, ~3.5 h) — the current CIFAR-100
    AdamW point is undertuned and would be an easy target.
 4. Step decay (4 h), budget seeds (6 h), headline seeds (4 h) — stretch.
+
+
+## Loss and accuracy disagree: what it means
+
+Final-epoch metrics, B1 vs the mean-matched cosine baseline:
+
+| dataset | val_loss (B1 - C) | t | val_acc (B1 - C) | t |
+|---|---|---|---|---|
+| CIFAR-100 | **-0.0268 (lower)** | **-5.02** | -0.20 pp | -1.48 (n.s.) |
+| CIFAR-10 | +0.0057 | +0.98 (n.s.) | +0.14 pp | +0.90 (n.s.) |
+
+On CIFAR-100, B1 reaches **the same accuracy at significantly lower
+cross-entropy**. On CIFAR-10 both metrics are statistically tied. So the apparent
+contradiction ("lower loss but not higher accuracy") is not a contradiction:
+
+* **Accuracy** counts only the argmax; **cross-entropy** scores the probability
+  assigned to the true class. They measure different things.
+* Confidence can improve without the decision changing: a sample at p(true)=0.6
+  costs 0.51 nats; at 0.9 it costs 0.105, while the argmax is unchanged.
+* CE penalises confident errors very heavily, so a model can trade a few confident
+  errors for sharper correct predictions and end up with lower loss at equal
+  accuracy.
+
+Two controls rule out the obvious artefacts:
+
+* **Evaluation phase**: B1 is evaluated at the LR trough. Re-running with
+  `--phase-offset 195` (evaluated at the peak) moves loss by +0.0041 (t=+0.64) and
+  accuracy not at all. Not an artefact.
+* **Noise**: the loss effect is t=-5.02 across three seeds.
+
+A third illustration from the same runs: AdamW lr2e-3/wd0.05 reaches its minimum
+*test loss* at epoch 42 but its best accuracy at epoch 188 -- loss and accuracy peak
+nine-tenths of training apart under a strongly-decayed schedule.
+
+**Implication for the paper:** accuracy stays the primary metric, because every
+claim is about reaching thresholds. The CIFAR-100 loss result is a secondary,
+favourable observation ("equal accuracy at lower cross-entropy"). It should be
+reported with a caveat: without a calibration metric (ECE) we cannot separate
+"better calibrated" from "more confident on the samples it already gets right".
