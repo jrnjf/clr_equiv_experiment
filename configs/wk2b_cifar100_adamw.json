@@ -1,0 +1,5 @@
+[
+  { "arms": ["AdamW_cosine"], "lr_max": 0.002, "weight_decay": 0.05,
+    "suffix": "_c100", "seeds": [0,1,2],
+    "_note": "CIFAR-100 AdamW at the config that won the CIFAR-10 grid (lr 2e-3, wd 0.05, final 0.9456 vs 0.9395 for the untuned lr1e-3/wd0.01). This is what a fair second-dataset comparison needs; the existing partial lr1e-3 run is kept as a secondary point but is not the baseline to report." }
+]
