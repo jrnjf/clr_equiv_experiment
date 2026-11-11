@@ -6,7 +6,7 @@
 |---|---|---|
 | 0_momentum | **never run** (skipped with `--from 1`) | 0 / 9 |
 | 1_adamw | **complete** | 12 / 12 |
-| 2_cifar100 | **partial** — all B1 + both cosine baselines; AdamW only seed 0, and at the *weaker* lr1e-3/wd0.01 | 10 / 12 |
+| 2_cifar100 | **complete** (finished separately with AdamW at the winning config) | 13 runs |
 | 3_method_lr | not run | 0 / 6 |
 | 4_step_decay | not run | 0 / 3 |
 | 5_budget_seeds | still n=1 per budget | 0 / 12 |
@@ -124,3 +124,38 @@ claim is about reaching thresholds. The CIFAR-100 loss result is a secondary,
 favourable observation ("equal accuracy at lower cross-entropy"). It should be
 reported with a caveat: without a calibration metric (ECE) we cannot separate
 "better calibrated" from "more confident on the samples it already gets right".
+
+
+## CIFAR-100, complete
+
+| arm | n | final | peak | t@65 | t@70 | t@75 |
+|---|---|---|---|---|---|---|
+| **B1 triangle x cosine** | 3 | 0.7761 | 0.7777 | **12** | **21** | 131 |
+| C cosine, peak 0.4 (mean-matched) | 3 | 0.7780 | 0.7799 | 68 | 112 | 131 |
+| C cosine, peak 0.2 | 3 | 0.7695 | 0.7710 | 40 | 90 | 112 |
+| **AdamW lr2e-3 wd0.05** (CIFAR-10-tuned) | 3 | **0.7373** | 0.7380 | 34 | 129 | never |
+| AdamW lr1e-3 wd0.01 | 1 | 0.7283 | 0.7294 | 17 | 86 | never |
+
+Against AdamW on CIFAR-100:
+
+* final accuracy **+3.88 pp**, t = +38.2, B1 wins 3/3
+* peak accuracy **+3.96 pp**, t = +24.9, B1 wins 3/3
+* t@65 2.7x faster, t@70 **6.1x faster**
+
+Against the mean-matched cosine on CIFAR-100 (unchanged): final accuracy tied
+(-0.20 pp, t = -1.48) with B1's cross-entropy significantly lower (-0.0268,
+t = -5.02), and 5.3-5.5x faster to 65/70%.
+
+### Caveat that must be stated
+
+The AdamW hyperparameters (lr 2e-3, wd 0.05) were **tuned on CIFAR-10 and applied
+unchanged to CIFAR-100**. That is exactly the asymmetric-tuning criticism this
+project has been trying to avoid. Two CIFAR-100 AdamW points now exist
+(0.7283 at lr1e-3/wd0.01, 0.7373 at lr2e-3/wd0.05), both well below B1's 0.7761,
+so the direction is consistent -- but a reviewer can reasonably ask for AdamW to be
+tuned on CIFAR-100 itself. If the true CIFAR-100 optimum is around 0.76, the
++3.9 pp claim shrinks toward the CIFAR-10 figure (+0.63 pp) or disappears.
+
+Priority note: per-dataset AdamW tuning is a ~7 h grid and affects only the
+secondary AdamW claim. The momentum baseline is still unrun and affects the
+primary speed claim.
