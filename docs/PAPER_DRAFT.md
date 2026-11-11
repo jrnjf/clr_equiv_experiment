@@ -285,3 +285,25 @@ with `python scripts/weekend_report.py`; figures with
 
 None of these can invalidate §5.1-§5.6; the first two are the most likely reviewer
 requests.
+
+
+
+### . Feedback and Recommendations to Enhance the Draft
+
+1. **Tone & Claims Calibration:**
+    
+    - Avoid framing your results as a claim of absolute superiority over long training horizons. Instead, frame them around **fast-convergence efficiency (anytime performance)** and mapping the boundaries of short-period training dynamics.
+        
+    - Emphasize **rigorous hypothesis testing**; as noted in your experiment plan, proving that performance remains stable or competitive within this ultra-short regime is itself a valuable contribution to the research community.
+        
+2. **Confounder Control:**
+    
+    - Document your random seed counts precisely. As highlighted in the background notes, relying on a small seed count (e.g., $n=3$) can leave minor gaps underpowered, so ensure variance bands are clearly visible on your plots, as you have done.
+        
+3. **Theoretical Grounding (Edge of Stability):**
+    
+    - It is highly recommended to include a brief nod in your introduction or discussion to the **Edge of Stability** literature (e.g., Cohen et al.). This theory helps explain why rapid learning rate oscillations reshape the loss landscape and prevent premature settling into sharp minima.
+        
+4. **Section Organization:**
+    
+    - Ensure that the **Weight-Decay Conventions** experiment (E2) receives ample space in your paper. Most practitioners overlook how weight decay couples with oscillating learning rates, making this a clear, actionable methodological contribution for training engineers.
