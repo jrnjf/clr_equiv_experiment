@@ -172,10 +172,10 @@ is never accumulated.
 
 | arm | n | final | t@65 | t@70 | t@75 |
 |---|---|---|---|---|---|
-| **triangle x cosine** | 3 | 0.7761 | **12** | **21** | 131 |
-| cosine, peak 0.4 (mean-matched) | 3 | 0.7780 | 68 | 112 | 131 |
-| cosine, peak 0.2 | 3 | 0.7695 | 40 | 90 | 112 |
-| AdamW + cosine (lr 2e-3, wd 0.05) | 3 | 0.7373 | 34 | 129 | never |
+| **triangle x cosine** | 3 | 0.7761 | **12.3** | **20.7** | 130.7 |
+| cosine, peak 0.4 (mean-matched) | 3 | 0.7780 | 67.7 | 112.3 | 130.7 |
+| cosine, peak 0.2 | 3 | 0.7695 | 40.3 | 89.7 | 112.0 |
+| AdamW + cosine (lr 2e-3, wd 0.05) | 3 | 0.7373 | 33.7 | 129.3 | never |
 
 Against the mean-matched control: t@65 **5.5x** (t = -27.3), t@70 **5.3x**
 (t = -76.0), final accuracy -0.20 pp (t = -1.48, n.s.). Against AdamW: **+3.88 pp**
