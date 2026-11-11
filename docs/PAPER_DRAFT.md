@@ -90,7 +90,12 @@ by the current learning rate (`sgd.py`:355, :379), which `LambdaLR` keeps update
 
 Note the alignment consequence: with a one-epoch cycle, every epoch boundary lands
 on the LR trough, so validation always measures the model at its most stable phase.
-We test this explicitly in §6.2.
+We test this explicitly in §5.2.
+
+![Figure 2](../figures/fig2_schedule.png)
+
+**Figure 2.** The schedule. Left: the first three epochs, one triangular cycle per
+epoch. Right: all 200 epochs, showing the cosine envelope multiplying the cycle.
 
 ## 4. Experimental setup
 
@@ -107,6 +112,13 @@ CIFAR-100 tops out near 78%, its thresholds are 65/70/75%.
 
 ### 5.1 Speed, against a mean-matched control (CIFAR-10)
 
+![Figure 1](../figures/fig1_cifar10_accuracy.png)
+
+**Figure 1.** Test accuracy on CIFAR-10/ResNet-18 (mean of 3 seeds, shaded $\pm$ 1
+s.d., 3-epoch moving average). The method (red) crosses 90% at epoch ~18. The
+standard momentum-0.9 recipe (green) needs ~108 epochs to do the same. Applying the
+same schedule *with* momentum (brown) is the worst arm in the figure.
+
 The method's mean learning rate is 0.200. A cosine anneal from peak 0.4 has mean
 0.2000, so it differs from the method in exactly one way: no triangular cycle.
 
@@ -122,6 +134,12 @@ t = 0.90, n.s.
 The advantage is threshold-dependent and largest early: 4.1x at 90%, 2.5x at 93%,
 1.3x at 94%, and a tie at 95% where both arms meet the ceiling. Reporting only 90%
 would be selective; the full curve is the result.
+
+![Figure 3](../figures/fig3_time_to_threshold.png)
+
+**Figure 3.** Epochs required to reach 90/93/94% test accuracy. The gap narrows as
+the threshold approaches the accuracy ceiling, which is the same pattern on both
+datasets (§5.6).
 
 ### 5.2 Evaluation phase is not a confound
 
@@ -169,6 +187,12 @@ instantaneous learning rate, and the triangular cycle keeps reinflating a step t
 is never accumulated.
 
 ### 5.6 Second dataset: CIFAR-100
+
+![Figure 4](../figures/fig4_cifar100_accuracy.png)
+
+**Figure 4.** CIFAR-100/ResNet-18, same protocol. The method reaches 70% at epoch
+~21 against ~112 for the mean-matched cosine baseline, then the arms converge by
+epoch ~130. The advantage lives in early-to-mid training on both datasets.
 
 | arm | n | final | t@65 | t@70 | t@75 |
 |---|---|---|---|---|---|
