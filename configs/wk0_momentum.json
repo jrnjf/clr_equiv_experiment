@@ -1,8 +1,8 @@
 [
   { "arms": ["C_cosine_only"], "lr_max": 0.1, "momentum": 0.9, "seeds": [0,1,2],
-    "_note": "THE STANDARD CIFAR RECIPE that every baseline in this project has been missing: SGD momentum 0.9, lr 0.1, cosine anneal. If this reaches 90% quickly the 4.1x claim is measured against a weak, momentum-free baseline." },
+    "_note": "THE STANDARD CIFAR RECIPE. SGD momentum 0.9, lr 0.1, cosine T_max=200, wd 5e-4, batch 128 (390 steps). Every arm in this project so far has had momentum 0, method included, so this baseline has never existed. If it reaches 90% near epoch 16-17 the 4.1x claim is dead; if it needs ~30+ the claim holds." },
   { "arms": ["C_cosine_only"], "lr_max": 0.2, "momentum": 0.9, "seeds": [0,1,2],
-    "_note": "Same, higher peak lr -- momentum tolerates a larger step, so this is the more dangerous baseline." },
+    "_note": "Momentum tolerates a larger step, so a tuned momentum baseline may prefer a higher peak than 0.1. This is the more dangerous of the two." },
   { "arms": ["B1_external_wd_eff"], "momentum": 0.9, "seeds": [0,1,2],
-    "_note": "Does the method survive momentum? If B1+momentum beats B1, the paper should use it and the claim gets stronger. If it breaks, 'momentum-free' is a real limitation to state." }
+    "_note": "Does the method survive momentum at peak lr 0.8? Two outcomes matter: if it improves on B1's 95.19% the paper should use momentum; if it diverges, 'momentum-free' is a genuine stability property worth stating (and 0.8 + momentum 0.9 may simply be too large a step)." }
 ]
