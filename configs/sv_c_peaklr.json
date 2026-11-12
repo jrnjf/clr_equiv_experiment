@@ -1,0 +1,7 @@
+[
+  {"arms": ["B1_external_wd_eff"], "lr_max": 0.4, "seeds": [0,1,2],
+   "_note": "P1 (reviewer 6.3). Peak-LR sensitivity; 0.8 is the existing arm. Reviewer asks for {0.4,0.6,0.8,1.0,1.2}."},
+  {"arms": ["B1_external_wd_eff"], "lr_max": 0.6, "seeds": [0,1,2]},
+  {"arms": ["B1_external_wd_eff"], "lr_max": 1.0, "seeds": [0,1,2]},
+  {"arms": ["B1_external_wd_eff"], "lr_max": 1.2, "seeds": [0,1,2]}
+]

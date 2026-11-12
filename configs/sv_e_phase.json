@@ -1,0 +1,5 @@
+[
+  {"arms": ["R_phase"], "phase_mode": "random_init", "seeds": [0,1,2],
+   "_note": "P2 (reviewer 6.1). Cycle phase randomised relative to epoch boundaries, to rule out an interaction between the LR cycle and data shuffling."},
+  {"arms": ["R_phase"], "phase_mode": "random_per_epoch", "seeds": [0,1,2]}
+]

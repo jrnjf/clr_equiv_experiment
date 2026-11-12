@@ -1,0 +1,11 @@
+[
+  {"arms": ["B1_external_wd_eff"], "suffix": "_val", "seeds": [0,1,2],
+   "_note": "P0 (reviewer 3.4). Headline arm re-run with a 45k/5k train/val split. val_history is now VALIDATION; final_test_acc is the untouched test split."},
+  {"arms": ["C_cosine_only"], "lr_max": 0.2, "suffix": "_val", "seeds": [0,1,2]},
+  {"arms": ["C_cosine_only"], "lr_max": 0.4, "suffix": "_val", "seeds": [0,1,2]},
+  {"arms": ["C_cosine_only"], "lr_max": 0.8, "suffix": "_val", "seeds": [0,1,2]},
+  {"arms": ["C_cosine_only"], "lr_max": 0.1, "momentum": 0.9, "suffix": "_val", "seeds": [0,1,2],
+   "_note": "the standard momentum recipe on the same split"},
+  {"arms": ["AdamW_cosine"], "lr_max": 0.002, "weight_decay": 0.05, "suffix": "_val", "seeds": [0,1,2],
+   "_note": "best tested AdamW config, re-run on the validation split"}
+]

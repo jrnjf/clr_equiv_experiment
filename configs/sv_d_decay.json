@@ -1,0 +1,6 @@
+[
+  {"arms": ["S_shrink"], "shrink": 1e-4, "seeds": [0,1,2],
+   "_note": "P1 (reviewer 4, condition C). LR-INDEPENDENT constant shrink at 1.0e-4 per step -- the method's mean per-step shrinkage, so decay STRENGTH matches and only the PROFILE differs. This is the missing condition C."},
+  {"arms": ["S_shrink"], "shrink": 5e-4, "seeds": [0,1,2],
+   "_note": "condition D: LR-independent at the original stronger 5e-4, reproducing what the removed F arm did"}
+]

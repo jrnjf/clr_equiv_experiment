@@ -344,6 +344,9 @@ def main(argv=None):
         lr_over = spec.get("lr_max")
         wd_over = spec.get("weight_decay")
         mom_over = spec.get("momentum")
+        per_over = spec.get("period_epochs")
+        phase_over = spec.get("phase_mode")
+        shrink_over = spec.get("shrink")
         sched_over = spec.get("global_schedule")
 
         print(f"\n--- spec: arms={arms} lr_max={run_cfg['lr_max']:g} "
@@ -361,6 +364,12 @@ def main(argv=None):
                     name = f"{name}_wd{wd_over:g}"
                 if mom_over is not None:
                     name = f"{name}_mom{mom_over:g}"
+                if per_over is not None and float(per_over) != 1.0:
+                    name = f"{name}_per{float(per_over):g}"
+                if phase_over not in (None, "none"):
+                    name = f"{name}_ph{phase_over}"
+                if shrink_over is not None:
+                    name = f"{name}_sh{float(shrink_over):g}"
                 if sched_over == "constant" and arm != "C_cosine_only":
                     name = f"{name}_noanneal"
                 if run_cfg.get("phase_offset"):

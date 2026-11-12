@@ -1,0 +1,8 @@
+[
+  {"arms": ["P_period"], "period_epochs": 0.25, "seeds": [0,1,2],
+   "_note": "P1 (reviewer 6.2). Full period sweep; 1.0 epoch is the existing B1 arm. Is the one-epoch regime special, or is one point in a broad sweep?"},
+  {"arms": ["P_period"], "period_epochs": 0.5, "seeds": [0,1,2]},
+  {"arms": ["P_period"], "period_epochs": 2.0, "seeds": [0,1,2]},
+  {"arms": ["P_period"], "period_epochs": 4.0, "seeds": [0,1,2]},
+  {"arms": ["P_period"], "period_epochs": 8.0, "seeds": [0,1,2]}
+]

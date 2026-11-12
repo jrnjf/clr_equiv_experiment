@@ -1,0 +1,20 @@
+{
+  "backend": "cifar",
+  "data_root": "data",
+  "batch_size": 128,
+  "epochs": 200,
+  "lr_max": 0.8,
+  "lr_SWR": 1000.0,
+  "global_schedule": "cosine",
+  "end_ratio": 1e-4,
+  "weight_decay": 5e-4,
+  "momentum": 0.0,
+  "log_every": 10,
+  "seeds": [0, 1, 2],
+  "device": "cuda",
+  "num_workers": 8,
+  "out_dir": "results_val",
+  "val_fraction": 0.1,
+  "split_seed": 0,
+  "_comment": "Reviewer 3.4: hold out 10% of the 50k TRAINING set as validation (45k train / 5k val), so hyperparameter selection never touches the 10k test split. steps_per_epoch becomes 45000/128 = 351. val_history is now VALIDATION accuracy; final_test_acc is the held-out test number."
+}
