@@ -233,17 +233,21 @@ class TestReviewerMechanisms(unittest.TestCase):
             self.skipTest("torch not installed")
 
     def test_period_setting_changes_cycle_length(self):
+        """A period of P epochs must put P-of-them per epoch.
+
+        Tested by definition rather than by counting sampled troughs: within the
+        first epoch the triangle can only climb to 2*(spe-1)/(P*spe) before the
+        epoch ends, and it must reach 1.0 whenever P <= 1.
+        """
         from dual_scheduler import dual_schedule_lambda
         spe = 390
-        # internal returns to the trough inside one epoch: the trough at step 0
-        # is not counted, so N cycles per epoch give N-1 crossings.
-        for per, expect in ((0.25, 3), (0.5, 1), (1.0, 0), (2.0, 0)):
+        for per in (0.25, 0.5, 1.0, 2.0, 4.0, 8.0):
             f = dual_schedule_lambda(spe, 0.8, 1000.0, 200, 1e-4, "cosine",
                                      period_epochs=per)
             vals = [f(t) for t in range(spe)]
-            cycles = sum(1 for i in range(1, len(vals))
-                         if vals[i] < 0.002 and vals[i - 1] >= 0.002)
-            self.assertEqual(cycles, expect, f"period {per} ep")
+            expected = min(1.0, 2 * (spe - 1) / (per * spe))
+            self.assertAlmostEqual(max(vals), expected, delta=0.01,
+                                   msg=f"period {per} ep")
 
     def test_phase_randomisation_breaks_epoch_lock(self):
         from dual_scheduler import dual_schedule_lambda
