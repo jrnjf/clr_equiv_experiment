@@ -82,20 +82,31 @@ for a in axes: a.grid(alpha=.25)
 fig.tight_layout(); fig.savefig(f"{OUT}/fig2_schedule.png", dpi=200)
 
 # ---- Fig 3: time to threshold -------------------------------------------
-def t_at(R, arm, thr):
+def t_at_all(R, arm, thr):
+    """Per-seed epochs to threshold (None if a seed never reaches it)."""
     v = []
-    for s in R.get(arm, {}):
+    for s in sorted(R.get(arm, {})):
         v.append(next((h["epoch"] for h in R[arm][s]["val_history"]
                        if h["val_acc"] >= thr), None))
-    v = [x for x in v if x is not None]
+    return v
+def t_at(R, arm, thr):
+    v = [x for x in t_at_all(R, arm, thr) if x is not None]
     return st.mean(v) if v else float("nan")
+def t_at_sd(R, arm, thr):
+    v = [x for x in t_at_all(R, arm, thr) if x is not None]
+    return st.stdev(v) if len(v) > 1 else 0.0
 thrs = [0.90, 0.93, 0.94]
 fig, ax = plt.subplots(figsize=(7, 3.8))
 import numpy as np
 x = np.arange(len(thrs)); w = 0.2
 for i, (arm, lab, c) in enumerate(arms[:4]):
     vals = [t_at(R10, arm, t) for t in thrs]
-    ax.bar(x + (i-1.5)*w, vals, w, label=lab, color=c)
+    errs = [t_at_sd(R10, arm, t) for t in thrs]
+    # +-1 s.d. across the three seeds, so the variance quoted in the tables is
+    # visible in the figure as well.
+    ax.bar(x + (i-1.5)*w, vals, w, label=lab, color=c,
+           yerr=errs, capsize=2.5,
+           error_kw=dict(lw=0.8, ecolor="#333333", capthick=0.8))
 ax.set_xticks(x); ax.set_xticklabels([f"{int(t*100)}%" for t in thrs])
 ax.set_ylabel("epochs to threshold"); ax.set_xlabel("accuracy threshold")
 ax.set_title("Time to reach a given accuracy (lower is better)")

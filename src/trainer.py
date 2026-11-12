@@ -94,6 +94,7 @@ def run_arm(
     log_every: int = 1,
     out_dir: str = "results",
     seed: int = 0,
+    test_eval=None,
 ):
     """Train one arm and write `{out_dir}/{arm_name}_seed{seed}.csv`.
 
@@ -212,6 +213,12 @@ def run_arm(
 
     summary = summarise(rows)
     summary["val_history"] = val_hist
+    # Held-out test evaluation, only when the backend has a separate test split
+    # (reviewer 3.4). val_history above is then validation, never test.
+    if test_eval is not None:
+        tl, ta = test_eval(model)
+        summary["final_test_loss"] = round(tl, 4)
+        summary["final_test_acc"] = round(ta, 4)
     summary["epoch_to_90"] = next((h["epoch"] for h in val_hist
                                    if h["val_acc"] >= 0.90), None)
     summary["wall_to_90"] = next((round(h["wall"], 1) for h in val_hist

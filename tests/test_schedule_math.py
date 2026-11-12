@@ -199,7 +199,8 @@ class TestLoggingDoesNotAffectTraining(unittest.TestCase):
         cfg = json.load(open(os.path.join(os.path.dirname(__file__), "..",
                                           "configs", "tiny.json")))
         cfg["epochs"] = 2
-        tl, _v, _t, make_model, eval_fn, spe = build_backend(cfg)
+        built = build_backend(cfg)
+        tl, _v, _t, make_model, eval_fn, spe = built[:6]
 
         def builder(model):
             return build_method(model, steps_per_epoch=spe, lr_max=cfg["lr_max"],
@@ -220,3 +221,46 @@ class TestLoggingDoesNotAffectTraining(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestReviewerMechanisms(unittest.TestCase):
+    """Mechanisms required by the supervisor review: period, phase, decay profile."""
+
+    def setUp(self):
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("torch not installed")
+
+    def test_period_setting_changes_cycle_length(self):
+        from dual_scheduler import dual_schedule_lambda
+        spe = 390
+        # internal returns to the trough inside one epoch: the trough at step 0
+        # is not counted, so N cycles per epoch give N-1 crossings.
+        for per, expect in ((0.25, 3), (0.5, 1), (1.0, 0), (2.0, 0)):
+            f = dual_schedule_lambda(spe, 0.8, 1000.0, 200, 1e-4, "cosine",
+                                     period_epochs=per)
+            vals = [f(t) for t in range(spe)]
+            cycles = sum(1 for i in range(1, len(vals))
+                         if vals[i] < 0.002 and vals[i - 1] >= 0.002)
+            self.assertEqual(cycles, expect, f"period {per} ep")
+
+    def test_phase_randomisation_breaks_epoch_lock(self):
+        from dual_scheduler import dual_schedule_lambda
+        spe = 390
+        none = [dual_schedule_lambda(spe, 0.8, 1000.0, 50, 1e-4, "cosine")(e * spe)
+                for e in range(5)]
+        rnd = [dual_schedule_lambda(spe, 0.8, 1000.0, 50, 1e-4, "cosine",
+                                    phase_mode="random_per_epoch",
+                                    phase_seed=7)(e * spe) for e in range(5)]
+        self.assertTrue(all(v < 0.002 for v in none))   # locked to the trough
+        self.assertGreater(len({round(v, 4) for v in rnd}), 1)
+
+    def test_constant_shrink_is_lr_independent(self):
+        import torch
+        from optim_shrink import ConstantShrinkSGD
+        p = torch.nn.Parameter(torch.ones(1))
+        opt = ConstantShrinkSGD([p], lr=0.0, momentum=0.0, shrink=1e-4)
+        p.grad = torch.zeros(1)
+        opt.step()
+        self.assertAlmostEqual(1.0 - p.item(), 1e-4, delta=1e-6)

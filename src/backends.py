@@ -53,6 +53,20 @@ def _build_tiny(cfg):
     val_full = make_split(n_val, 2)
     test_full = make_split(n_test, 3)
 
+    # Mirror the cifar backend's val_fraction so the validation/test separation
+    # (reviewer 3.4) can be exercised on CPU.
+    tiny_val_fraction = float(cfg.get("val_fraction", 0.0))
+    if tiny_val_fraction > 0:
+        import torch as _t
+        from torch.utils.data import Subset
+        n = len(train_full)
+        n_v = max(1, int(round(n * tiny_val_fraction)))
+        gg = _t.Generator().manual_seed(int(cfg.get("split_seed", 0)))
+        perm = _t.randperm(n, generator=gg).tolist()
+        val_idx, tr_idx = perm[:n_v], perm[n_v:]
+        val_full = Subset(train_full, val_idx)
+        train_full = Subset(train_full, tr_idx)
+
     steps = len(train_full) // bs
     if steps % 2:
         raise SystemExit(
@@ -80,12 +94,12 @@ def _build_tiny(cfg):
 
     device = cfg.get("device", "cpu")
 
-    def eval_fn(model, _=None):
+    def _eval_on(model, loader):
         model.eval()
         crit = nn.CrossEntropyLoss()
         tot_loss, correct, n = 0.0, 0, 0
         with torch.no_grad():
-            for x, y in val_loader:
+            for x, y in loader:
                 x, y = x.to(device), y.to(device)
                 out = model(x)
                 tot_loss += crit(out, y).item() * x.size(0)
@@ -93,8 +107,13 @@ def _build_tiny(cfg):
                 n += x.size(0)
         return tot_loss / n, correct / n
 
+    def eval_fn(model, _=None):
+        return _eval_on(model, val_loader)
+
+    tiny_test_eval = ((lambda model: _eval_on(model, test_loader))
+                      if tiny_val_fraction > 0 else None)
     return (train_loader, val_loader, test_loader,
-            make_model, eval_fn, len(train_loader))
+            make_model, eval_fn, len(train_loader), tiny_test_eval)
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +155,24 @@ def _build_cifar_like(cfg, dataset="CIFAR10", num_classes=10):
     train_set = ds(root, train=True, download=True, transform=train_tf)
     test_set = ds(root, train=False, download=True, transform=eval_tf)
 
+    # Reviewer 3.4: hyperparameters must not be selected on the test split.
+    # With val_fraction > 0, hold out that fraction of the TRAINING data as a
+    # validation set. Two dataset instances are built so the validation split gets
+    # eval transforms (no random crop/flip) rather than train transforms.
+    test_eval = None
+    val_fraction = float(cfg.get("val_fraction", 0.0))
+    if val_fraction > 0:
+        import torch
+        from torch.utils.data import Subset
+        n_total = len(train_set)
+        n_val = int(round(n_total * val_fraction))
+        g = torch.Generator().manual_seed(int(cfg.get("split_seed", 0)))
+        perm = torch.randperm(n_total, generator=g).tolist()
+        val_idx, tr_idx = perm[:n_val], perm[n_val:]
+        train_eval_ds = ds(root, train=True, download=True, transform=eval_tf)
+        train_set = Subset(train_set, tr_idx)
+        val_set = Subset(train_eval_ds, val_idx)
+
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
     # persistent_workers=True: without it every `for ... in loader` spawns a
@@ -152,6 +189,13 @@ def _build_cifar_like(cfg, dataset="CIFAR10", num_classes=10):
     eval_loader = DataLoader(test_set, batch_size=1024, shuffle=False,
                              num_workers=nw, pin_memory=True,
                              persistent_workers=pw)
+
+    if val_fraction > 0:
+        val_loader = DataLoader(val_set, batch_size=1024, shuffle=False,
+                                num_workers=nw, pin_memory=True,
+                                persistent_workers=pw)
+    else:
+        val_loader = eval_loader
 
     steps = len(train_loader)          # e.g. 50000/250 = 200
     if steps % 2:
@@ -170,12 +214,12 @@ def _build_cifar_like(cfg, dataset="CIFAR10", num_classes=10):
 
     device = cfg.get("device", "cuda")
 
-    def eval_fn(model, _=None):
+    def _eval_on(model, loader):
         model.eval()
         crit = nn.CrossEntropyLoss()
         tot_loss, correct, n = 0.0, 0, 0
         with torch.no_grad():
-            for x, y in eval_loader:
+            for x, y in loader:
                 x, y = x.to(device), y.to(device)
                 out = model(x)
                 tot_loss += crit(out, y).item() * x.size(0)
@@ -183,8 +227,14 @@ def _build_cifar_like(cfg, dataset="CIFAR10", num_classes=10):
                 n += x.size(0)
         return tot_loss / n, correct / n
 
-    return (train_loader, eval_loader, eval_loader, make_model, eval_fn,
-            len(train_loader))
+    def eval_fn(model, _=None):
+        return _eval_on(model, val_loader)
+
+    if val_fraction > 0:
+        test_eval = lambda model: _eval_on(model, eval_loader)
+
+    return (train_loader, val_loader, eval_loader, make_model, eval_fn,
+            len(train_loader), test_eval)
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +272,24 @@ def _build_cifar_bench(cfg):
     train_set = ds(root, train=True, download=True, transform=train_tf)
     test_set = ds(root, train=False, download=True, transform=eval_tf)
 
+    # Reviewer 3.4: hyperparameters must not be selected on the test split.
+    # With val_fraction > 0, hold out that fraction of the TRAINING data as a
+    # validation set. Two dataset instances are built so the validation split gets
+    # eval transforms (no random crop/flip) rather than train transforms.
+    test_eval = None
+    val_fraction = float(cfg.get("val_fraction", 0.0))
+    if val_fraction > 0:
+        import torch
+        from torch.utils.data import Subset
+        n_total = len(train_set)
+        n_val = int(round(n_total * val_fraction))
+        g = torch.Generator().manual_seed(int(cfg.get("split_seed", 0)))
+        perm = torch.randperm(n_total, generator=g).tolist()
+        val_idx, tr_idx = perm[:n_val], perm[n_val:]
+        train_eval_ds = ds(root, train=True, download=True, transform=eval_tf)
+        train_set = Subset(train_set, tr_idx)
+        val_set = Subset(train_eval_ds, val_idx)
+
     bs = int(cfg["batch_size"])
     nw = cfg.get("num_workers", 4)
     # drop_last=True exactly as in jrnjf/sgd_jumper (50000/128 -> 390 steps)
@@ -247,12 +315,12 @@ def _build_cifar_bench(cfg):
 
     device = cfg.get("device", "cuda")
 
-    def eval_fn(model, _=None):
+    def _eval_on(model, loader):
         model.eval()
         crit = nn.CrossEntropyLoss()
         tot_loss, correct, n = 0.0, 0, 0
         with torch.no_grad():
-            for x, y in val_loader:
+            for x, y in loader:
                 x, y = x.to(device), y.to(device)
                 out = model(x)
                 tot_loss += crit(out, y).item() * x.size(0)
@@ -260,8 +328,11 @@ def _build_cifar_bench(cfg):
                 n += x.size(0)
         return tot_loss / n, correct / n
 
-    return (train_loader, val_loader, test_loader, make_model, eval_fn,
-            len(train_loader))
+    def eval_fn(model, _=None):
+        return _eval_on(model, val_loader)
+
+    return (train_loader, val_loader, test_loader,
+            make_model, eval_fn, len(train_loader))
 
 
 # ---------------------------------------------------------------------------

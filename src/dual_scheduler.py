@@ -38,7 +38,10 @@ from schedules import cosine_anneal, triangle_wave
 
 def dual_schedule_lambda(steps_per_epoch: int, lr_max: float, lr_SWR: float,
                          total_epochs: float, end_ratio: float = 1e-4,
-                         global_name: str = "cosine", phase_offset: int = 0):
+                         global_name: str = "cosine", phase_offset: float = 0,
+                         period_epochs: float = 1.0,
+                         phase_mode: str = "none",
+                         phase_seed: int = 1234):
     """Return f(step) -> LR multiplier for LambdaLR.
 
     `phase_offset` (in steps) shifts the triangle within the epoch. With the
@@ -52,9 +55,35 @@ def dual_schedule_lambda(steps_per_epoch: int, lr_max: float, lr_SWR: float,
     if steps_per_epoch < 2:
         raise ValueError("steps_per_epoch must be >= 2")
 
+    # Reviewer 6.2: the period is a free parameter, not assumed to be 1 epoch.
+    period_steps = float(period_epochs) * steps_per_epoch
+    if period_steps < 2:
+        raise ValueError("period_epochs too small: period would be < 2 steps")
+
+    # Reviewer 6.1: is the effect an artefact of the cycle being phase-locked to
+    # epoch boundaries (and therefore to data shuffling)? Two randomisations:
+    # a single random initial phase, or a fresh random phase every epoch.
+    offsets = None
+    if phase_mode != "none":
+        import random
+        rng = random.Random(phase_seed)
+        if phase_mode == "random_init":
+            offsets = [rng.uniform(0.0, period_steps)]
+        elif phase_mode == "random_per_epoch":
+            offsets = [rng.uniform(0.0, period_steps)
+                       for _ in range(int(total_epochs) + 2)]
+        else:
+            raise ValueError(f"unknown phase_mode {phase_mode!r}")
+
     def lr_lambda(step: int) -> float:
-        local = triangle_wave((step + phase_offset) % steps_per_epoch,
-                              steps_per_epoch, 1.0, 1.0 / lr_SWR)
+        if offsets is None:
+            off = phase_offset
+        elif len(offsets) == 1:
+            off = offsets[0]
+        else:
+            off = offsets[int(step // steps_per_epoch)]
+        # triangle_wave already applies the modulo, so a float period works.
+        local = triangle_wave(step + off, period_steps, 1.0, 1.0 / lr_SWR)
         if global_name in ("cosine", "cos"):
             g = cosine_anneal(step / float(steps_per_epoch), total_epochs,
                               end_ratio)
@@ -95,16 +124,18 @@ def train_step(opt, sched, loss=None):
 def build_method(model, steps_per_epoch: int, lr_max: float, lr_SWR: float,
                  global_name: str, total_epochs: float, end_ratio: float,
                  weight_decay: float, momentum: float = 0.0,
-                 phase_offset: int = 0, **_ignored):
+                 phase_offset: float = 0.0, period_epochs: float = 1.0,
+                 phase_mode: str = "none", phase_seed: int = 1234,
+                 **_ignored):
     """The method: stock SGD + LambdaLR. Nothing custom."""
     from torch.optim import SGD
     from torch.optim.lr_scheduler import LambdaLR
 
     opt = SGD(model.parameters(), lr=lr_max, momentum=momentum,
               weight_decay=weight_decay)
-    sched = LambdaLR(opt, dual_schedule_lambda(steps_per_epoch, lr_max, lr_SWR,
-                                               total_epochs, end_ratio,
-                                               global_name, phase_offset))
+    sched = LambdaLR(opt, dual_schedule_lambda(
+        steps_per_epoch, lr_max, lr_SWR, total_epochs, end_ratio, global_name,
+        phase_offset, period_epochs, phase_mode, phase_seed))
     return opt, sched
 
 
@@ -351,4 +382,33 @@ def build_growing_period(model, steps_per_epoch: int, lr_max: float,
     sched = LambdaLR(opt, piecewise_period_lambda(steps_per_epoch, lr_SWR,
                                                   segments, total_epochs,
                                                   end_ratio, global_name))
+    return opt, sched
+
+
+def build_constant_shrink(model, steps_per_epoch: int, lr_max: float,
+                          lr_SWR: float, global_name: str, total_epochs: float,
+                          end_ratio: float, weight_decay: float,
+                          momentum: float = 0.0, shrink: float = 1e-4,
+                          period_epochs: float = 1.0, phase_mode: str = "none",
+                          phase_seed: int = 1234, **_ignored):
+    """Reviewer 4, conditions C and D: decay whose strength is LR-INDEPENDENT.
+
+    Same learning-rate schedule as the method, but the per-step shrinkage is a
+    constant fraction of the weights rather than `weight_decay * lr_t`. C sets
+    `shrink` equal to the method's mean per-step shrinkage (1.0e-4) so that decay
+    STRENGTH is matched and only the PROFILE differs; D uses the stronger 5e-4
+    that the original F arm used.
+
+    torch.optim.SGD with weight_decay=0 plus a pre-step `p *= (1 - shrink)`, which
+    mirrors SGD's own ordering (sgd.py: decay is applied to the gradient, so the
+    weight is multiplied before the gradient update).
+    """
+    from torch.optim.lr_scheduler import LambdaLR
+    from optim_shrink import ConstantShrinkSGD
+
+    opt = ConstantShrinkSGD(model.parameters(), lr=lr_max, momentum=momentum,
+                            weight_decay=0.0, shrink=shrink)
+    sched = LambdaLR(opt, dual_schedule_lambda(
+        steps_per_epoch, lr_max, lr_SWR, total_epochs, end_ratio, global_name,
+        0.0, period_epochs, phase_mode, phase_seed))
     return opt, sched

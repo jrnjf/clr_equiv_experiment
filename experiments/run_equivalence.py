@@ -55,6 +55,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from dual_scheduler import (assert_same_lr_series, build_adamw_cosine,
+                            build_constant_shrink,
                             build_adamw_dual, build_constant,
                             build_cosine_only, build_growing_period, build_internal,
                             build_method, build_step_decay,
@@ -62,7 +63,8 @@ from dual_scheduler import (assert_same_lr_series, build_adamw_cosine,
 from schedules import effective_lr_series
 
 ARMS = ("A_internal", "B1_external_wd_eff", "C_cosine_only", "constant",
-        "AdamW_cosine", "AdamW_dual", "G_grow", "D_step")
+        "AdamW_cosine", "AdamW_dual", "G_grow", "D_step",
+        "P_period", "R_phase", "S_shrink")
 
 DEFAULTS = {
     "backend": "tiny",
@@ -111,7 +113,12 @@ def make_opt_builder(cfg, spe, arm):
                   lr_SWR=cfg["lr_SWR"], global_name=cfg["global_schedule"],
                   total_epochs=cfg["epochs"], end_ratio=cfg["end_ratio"],
                   weight_decay=float(cfg["weight_decay"]),
-                  momentum=cfg.get("momentum", 0.0))
+                  momentum=cfg.get("momentum", 0.0),
+                  phase_offset=cfg.get("phase_offset", 0.0),
+                  period_epochs=cfg.get("period_epochs", 1.0),
+                  phase_mode=cfg.get("phase_mode", "none"),
+                  phase_seed=cfg.get("phase_seed", 1234),
+                  shrink=cfg.get("shrink", 1e-4))
 
     def build(model):
         if arm == "A_internal":
@@ -125,6 +132,15 @@ def make_opt_builder(cfg, spe, arm):
             return build_constant(model, **common)
         if arm == "D_step":
             return build_step_decay(model, **common)
+        if arm == "P_period":
+            # period sweep (reviewer 6.2): period_epochs comes from the spec
+            return build_method(model, **common)
+        if arm == "R_phase":
+            # cycle-phase randomisation (reviewer 6.1)
+            return build_method(model, **common)
+        if arm == "S_shrink":
+            # LR-independent decay, strength-matched (reviewer 4, condition C/D)
+            return build_constant_shrink(model, **common)
         if arm == "G_grow":
             c = dict(common)
             c["period_segments"] = cfg.get("period_segments",
@@ -188,7 +204,9 @@ def check_equivalence(cfg):
         cfg["backend"] = "tiny"
         print("NOTE: --check-equivalence forces backend=tiny (fast, CPU)")
 
-    train_loader, _val, _test, make_model, eval_fn, spe = build_backend(cfg)
+    built = build_backend(cfg)
+    train_loader, _val, _test, make_model, eval_fn, spe = built[:6]
+    test_eval = built[6] if len(built) > 6 else None
     print(f"tiny backend: steps_per_epoch={spe} epochs={cfg['epochs']}")
 
     finals = {}
@@ -300,7 +318,9 @@ def main(argv=None):
         print("WARNING: cuda unavailable, falling back to cpu")
         cfg["device"] = "cpu"
 
-    train_loader, _val, _test, make_model, eval_fn, spe = build_backend(cfg)
+    built = build_backend(cfg)
+    train_loader, _val, _test, make_model, eval_fn, spe = built[:6]
+    test_eval = built[6] if len(built) > 6 else None
     print(f"{cfg['backend']}: steps_per_epoch={spe} epochs={cfg['epochs']} "
           f"device={cfg['device']}")
 
@@ -364,7 +384,8 @@ def main(argv=None):
                     epochs=run_cfg["epochs"], steps_per_epoch=spe,
                     device=run_cfg["device"],
                     log_every=run_cfg["log_every"],
-                    out_dir=run_cfg["out_dir"], seed=seed))
+                    out_dir=run_cfg["out_dir"], seed=seed,
+                    test_eval=test_eval))
 
     os.makedirs(cfg["out_dir"], exist_ok=True)
     # MERGE with any existing summary rather than overwrite: runs are launched
