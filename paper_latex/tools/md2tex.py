@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert docs/PAPER_DRAFT_REV_B.md into paper_latex/paper.tex.
+"""Convert docs/PAPER_DRAFT_REV_C.md into paper_latex/paper.tex.
 
 One-off build helper; the canonical artefact is paper.tex. Run from anywhere:
     python3 paper_latex/tools/md2tex.py
@@ -8,11 +8,11 @@ import re, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-MD = os.path.join(ROOT, "docs", "PAPER_DRAFT_REV_B.md")
+MD = os.path.join(ROOT, "docs", "PAPER_DRAFT_REV_C.md")
 OUT = os.path.join(ROOT, "paper_latex", "paper.tex")
 
 raw = open(MD, encoding="utf-8").read().split("\n")
-start = next(i for i, l in enumerate(raw) if l.strip() == "## Abstract")
+start = next(i for i, l in enumerate(raw) if l.strip().startswith("> **Revision C status.**"))
 lines = raw[start:]
 
 
@@ -76,6 +76,8 @@ def inline(t):
             return "$" + raw + "$"
         if prefix == "U":
             return "\\url{" + raw + "}"
+        if "/" in raw and " " not in raw:
+            return "\\path{" + raw + "}"
         return "\\texttt{" + esc_code(raw) + "}"
     return re.sub(r"\x00[MCU](\d+)\x00", restore, out)
 
@@ -93,7 +95,9 @@ def parse_table(rows):
     body = cells_rows[2:]
     n = len(header)
     maxlen = max((len(c) for row in body for c in row), default=0)
-    texty = maxlen > 40
+    h0 = header[0].lower() if header else ""
+    texty = maxlen > 40 or h0 == "comparison"
+    wide = h0 in ("schedule", "condition")
     if texty:
         h0 = header[0].lower() if header else ""
         if h0 == "result":
@@ -113,12 +117,17 @@ def parse_table(rows):
     out = ["\\begin{center}", font]
     if cmp_tab:
         out.append("\\setlength{\\tabcolsep}{3pt}")
+    if wide:
+        out.append("\\resizebox{\\linewidth}{!}{%")
     out += ["\\begin{tabular}{" + spec + "}", "\\toprule",
             " & ".join("\\textbf{" + inline(c) + "}" for c in header) + " \\\\",
             "\\midrule"]
     for row in body:
         out.append(" & ".join(inline(c) for c in row) + " \\\\")
-    out += ["\\bottomrule", "\\end{tabular}", "\\end{center}"]
+    out += ["\\bottomrule", "\\end{tabular}"]
+    if wide:
+        out.append("}")
+    out.append("\\end{center}")
     return "\n".join(out)
 
 
@@ -233,7 +242,9 @@ while i < len(blocks):
             continue
         if val.startswith("Appendix"):
             title = re.sub(r"^Appendix\s+[A-Z]\.\s*", "", val)
-            body += ["\\appendix", "\\section{" + inline(title) + "}"]
+            if not any(x == "\\appendix" for x in body):
+                body.append("\\appendix")
+            body.append("\\section{" + inline(title) + "}")
             i += 1; continue
         title = re.sub(r"^\d+\.\s*", "", val)
         body.append("\\section{" + inline(title) + "}")
@@ -291,10 +302,10 @@ preamble = r"""\documentclass[11pt,a4paper]{article}
 \setlength{\parindent}{0pt}
 \renewcommand{\arraystretch}{1.12}
 
-\title{Faster, not better: mapping the anytime efficiency\\[2pt]
-and boundaries of short-period learning-rate cycles}
+\title{Just a configuration: a triangular cycle makes\\[2pt]
+momentum-free SGD reach target accuracies several times sooner}
 \author{Anonymous Authors}
-\date{Draft --- Revision B}
+\date{Draft --- Revision C}
 
 \begin{document}
 \maketitle

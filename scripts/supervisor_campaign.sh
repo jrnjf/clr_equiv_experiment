@@ -62,13 +62,27 @@ for b in "${BATTERIES[@]}"; do
   fi
 
   log="$OUT/$id.log"
+  before=$(ls results*/*_seed*.json 2>/dev/null | wc -l)
   echo "=== [$(date +%H:%M)] START $id  ($why)  [$item]"
   "$PY" -u experiments/run_equivalence.py --config "configs/$cfg.json" \
        --sweep "$sweep" --skip-existing 2>&1 | tee -a "$log" \
-       | grep -E '^===|^---|epoch [0-9]+/' || true
+       | grep -E '^===|^---|epoch [0-9]+/'
+  # Capture PIPESTATUS IMMEDIATELY. Appending `|| true` here silently clobbered it
+  # with the status of `true`, so a battery that crashed at step 0 was reported as
+  # DONE -- which is exactly how battery a appeared to finish in 0 minutes.
   rc=${PIPESTATUS[0]}
-  [ $rc -eq 0 ] && echo "=== [$(date +%H:%M)] DONE  $id" \
-                || echo "=== [$(date +%H:%M)] FAILED $id (exit $rc) -- continuing"
+  after=$(ls results*/*_seed*.json 2>/dev/null | wc -l)
+  new_files=$((after - before))
+  if [ $rc -ne 0 ]; then
+    echo "=== [$(date +%H:%M)] FAILED $id (exit $rc), $new_files new result files -- continuing"
+    echo "    last error lines:"; tail -4 "$log" | sed 's/^/      /'
+  elif [ "$new_files" -eq 0 ]; then
+    echo "=== [$(date +%H:%M)] SUSPECT $id: exit 0 but produced NO new result files."
+    echo "    Everything was skipped by --skip-existing, or the config produced no runs."
+    echo "    Check: tail -20 $log"
+  else
+    echo "=== [$(date +%H:%M)] DONE  $id ($new_files new result files)"
+  fi
   echo
 done
 
