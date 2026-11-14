@@ -1,0 +1,73 @@
+# Weekend results  
+
+136 runs loaded from results*/ (newest file wins on duplicate arm+seed).
+
+## A. Headline (CIFAR-10, 200 epochs)
+
+| arm | n | peak | final | t@90 | t@93 | t@94 | t@95 |
+|---|---|---|---|---|---|---|---|
+| `B1_external_wd_eff` | 5 | 0.9522 | 0.9514 | 16 | 55 | 111 | 168 |
+| `C_cosine_only_lr0.4` | 5 | 0.9523 | 0.9514 | 69 | 132 | 148 | 163 |
+| `C_cosine_only_lr0.2` | 3 | 0.9512 | 0.9507 | 44 | 114 | 134 | 171 |
+| `C_cosine_only` | 3 | 0.9503 | 0.9493 | 105 | 151 | 162 | 189 |
+| `AdamW_cosine_lr0.001` | 3 | 0.9416 | 0.9405 | 20 | 103 | 172 | never |
+| `B1_external_wd_eff_noanneal` | 3 | 0.9398 | 0.9363 | 17 | 63 | 175 | never |
+
+* B1 − `C_cosine_only_lr0.4` final: **-0.00 pp**  t=-0.01  n=5  B1 higher in 3/5
+* B1 − `C_cosine_only_lr0.4` t90: **-53.00 ep**  t=-18.18  n=5  B1 faster in 5/5
+* B1 − `C_cosine_only_lr0.4` t94: **-37.40 ep**  t=-5.87  n=5  B1 faster in 5/5
+* B1 − `C_cosine_only_lr0.2` final: **+0.11 pp**  t=+1.05  n=3  B1 higher in 2/3
+* B1 − `C_cosine_only_lr0.2` t90: **-27.67 ep**  t=-8.43  n=3  B1 faster in 3/3
+* B1 − `C_cosine_only_lr0.2` t94: **-21.67 ep**  t=-4.04  n=3  B1 faster in 3/3
+* B1 − `C_cosine_only` final: **+0.26 pp**  t=+5.50  n=3  B1 higher in 3/3
+* B1 − `C_cosine_only` t90: **-88.67 ep**  t=-14.96  n=3  B1 faster in 3/3
+* B1 − `C_cosine_only` t94: **-50.33 ep**  t=-8.15  n=3  B1 faster in 3/3
+* B1 − `AdamW_cosine_lr0.001` final: **+1.13 pp**  t=+7.92  n=3  B1 higher in 3/3
+* B1 − `AdamW_cosine_lr0.001` t90: **-3.33 ep**  t=-1.89  n=3  B1 faster in 2/3
+* B1 − `AdamW_cosine_lr0.001` t94: **-63.00 ep**  t=-31.50  n=2  B1 faster in 2/2
+* B1 − `B1_external_wd_eff_noanneal` final: **+1.56 pp**  t=+13.79  n=3  B1 higher in 3/3
+* B1 − `B1_external_wd_eff_noanneal` t90: **+0.00 ep**  t=+0.00  n=3  B1 faster in 2/3
+
+## B. AdamW tuning — decides the +1.1 pp claim
+
+| arm | n | peak | final | t@90 | t@93 | t@94 | t@95 |
+|---|---|---|---|---|---|---|---|
+| `AdamW_cosine_lr0.0003` | 3 | 0.9353 | 0.9343 | 27 | 145 | never | never |
+| `AdamW_cosine_lr0.001` | 3 | 0.9416 | 0.9405 | 20 | 103 | 172 | never |
+| `AdamW_cosine_lr0.001_wd0.01` | 3 | 0.9402 | 0.9395 | 22 | 96 | 171 | never |
+| `AdamW_cosine_lr0.001_wd0.05` | 3 | 0.9411 | 0.9404 | 22 | 112 | 177 | never |
+| `AdamW_cosine_lr0.002_wd0.01` | 3 | 0.9416 | 0.9407 | 22 | 100 | 169 | never |
+| `AdamW_cosine_lr0.002_wd0.05` | 3 | 0.9467 | 0.9456 | 23 | 120 | 159 | never |
+| `AdamW_dual_lr0.001` | 3 | 0.9379 | 0.9373 | 16 | 86 | never | never |
+
+**Best AdamW: `AdamW_cosine_lr0.002_wd0.05` final 0.9456.**  Claim survives if this stays below B1's final (0.9514).
+
+## C. CIFAR-100 — decides main-track viability
+
+| arm | n | peak | final | t@90 | t@93 | t@94 | t@95 |
+|---|---|---|---|---|---|---|---|
+| `AdamW_cosine_lr0.001_wd0.01_c100` | 1 | 0.7294 | 0.7283 | never | never | never | never |
+| `AdamW_cosine_lr0.002_wd0.05_c100` | 3 | 0.7380 | 0.7373 | never | never | never | never |
+| `B1_external_wd_eff_c100` | 3 | 0.7777 | 0.7761 | never | never | never | never |
+| `C_cosine_only_lr0.2_c100` | 3 | 0.7710 | 0.7695 | never | never | never | never |
+| `C_cosine_only_lr0.4_c100` | 3 | 0.7799 | 0.7780 | never | never | never | never |
+
+* B1 − `AdamW_cosine_lr0.002_wd0.05_c100` final: **+3.88 pp**  t=+38.24  n=3  B1 higher in 3/3
+* B1 − `C_cosine_only_lr0.2_c100` final: **+0.66 pp**  t=+2.81  n=3  B1 higher in 3/3
+* B1 − `C_cosine_only_lr0.4_c100` final: **-0.20 pp**  t=-1.48  n=3  B1 higher in 0/3
+
+## D. Budget-matched — peak gap vs budget
+
+| budget | arm | n | t@90 | final | peak |
+|---|---|---|---|---|---|
+| 40 | B1 triangle×cosine | 1 | 15 | 0.9324 | 0.9328 |
+| 40 | cosine anneal 0.2 | 1 | 21 | 0.9271 | 0.9271 |
+| 80 | B1 triangle×cosine | 1 | 15 | 0.9445 | 0.9449 |
+| 80 | cosine anneal 0.2 | 1 | 30 | 0.9369 | 0.9395 |
+| 160 | B1 triangle×cosine | 1 | 16 | 0.9496 | 0.9498 |
+| 160 | cosine anneal 0.2 | 1 | 45 | 0.9452 | 0.9455 |
+
+Note: budgets 40/80/160 use anneal horizon = budget for both arms. The 200 row is the full-budget run.
+
+
+wrote docs/WEEKEND_RESULTS.md

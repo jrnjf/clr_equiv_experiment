@@ -1,0 +1,1 @@
+cifar: len(train_loader) = 351 is ODD, so the triangular half-cycle is 175.5 and no CyclicLR configuration reproduces the internal wave exactly. With 50000 train images, use a batch size giving an even step count (250 -> 200, 200 -> 250, 100 -> 500).

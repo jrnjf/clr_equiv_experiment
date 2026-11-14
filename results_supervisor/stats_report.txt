@@ -1,0 +1,61 @@
+============================================================================================
+PAIRED COMPARISONS (per-seed differences, 95% CI, exact permutation p)
+============================================================================================
+
+vs mean-matched cosine  (final, n=3)
+  per seed : [0.02, -0.05, 0.46]
+  mean     : +0.143 pp   95% CI [-0.543, +0.830]
+  t=+0.90  p(t)=0.4640  exact permutation p=0.750
+
+vs mean-matched cosine  (epoch@90%, n=3)
+  per seed : [-47, -61, -48]
+  mean     : -52.000 ep   95% CI [-71.402, -32.598]
+  t=-11.53  p(t)=0.0074  exact permutation p=0.250
+
+vs standard momentum  (final, n=3)
+  per seed : [0.04, -0.21, -0.33]
+  mean     : -0.167 pp   95% CI [-0.636, +0.302]
+  t=-1.53  p(t)=0.2658  exact permutation p=0.500
+
+vs standard momentum  (epoch@90%, n=3)
+  per seed : [-91, -93, -89]
+  mean     : -91.000 ep   95% CI [-95.968, -86.032]
+  t=-78.81  p(t)=0.0002  exact permutation p=0.250
+
+vs best tested AdamW  (final, n=3)
+  per seed : [0.79, 0.45, 0.64]
+  mean     : +0.627 pp   95% CI [+0.203, +1.050]
+  t=+6.37  p(t)=0.0238  exact permutation p=0.250
+
+vs method+momentum  (final, n=3)
+  per seed : [2.91, 2.64, 2.92]
+  mean     : +2.823 pp   95% CI [+2.429, +3.218]
+  t=+30.78  p(t)=0.0011  exact permutation p=0.250
+
+============================================================================================
+CORRECTED POWER (reviewer 3.3)
+============================================================================================
+The review says 80% power at n=3 needs d/sigma ~ 3.26, not 2.84.
+  n=3: d/sigma needed for 80% power = 3.26
+  n=5: d/sigma needed for 80% power = 1.70
+  n=8: d/sigma needed for 80% power = 1.16
+
+Detectable final-accuracy difference, using the observed paired SD:
+  vs mean-matched cosine   paired SD = 0.28 pp -> detectable at 80% power = 0.90 pp (observed 0.14 pp)
+  vs best tested AdamW     paired SD = 0.17 pp -> detectable at 80% power = 0.56 pp (observed 0.63 pp)
+
+With n=3 the exact permutation test cannot go below p=0.25 no matter
+how large the effect is (8 sign patterns). Report effect sizes and CIs,
+and describe agreement across seeds rather than leaning on t p-values.
+
+============================================================================================
+WALL-CLOCK TIME TO THRESHOLD (reviewer 6.4)
+============================================================================================
+arm                                 t@90 (ep)  wall@90 (s)  wall@93 (s)
+B1_external_wd_eff                         17          339         1067
+C_cosine_only_lr0.4                        69         1357         2606
+C_cosine_only_lr0.1_mom0.9                108         2806         3917
+AdamW_cosine_lr0.002_wd0.05                23          983         5139
+
+Note: wall-clock includes per-epoch validation of 10k images, which is
+equal across arms, so it does not tilt the comparison.

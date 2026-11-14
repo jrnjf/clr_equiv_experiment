@@ -1,161 +1,71 @@
-# Weekend results (power loss during battery 2)
+# Weekend results  
 
-## What completed
+136 runs loaded from results*/ (newest file wins on duplicate arm+seed).
 
-| battery | status | runs |
-|---|---|---|
-| 0_momentum | **never run** (skipped with `--from 1`) | 0 / 9 |
-| 1_adamw | **complete** | 12 / 12 |
-| 2_cifar100 | **complete** (finished separately with AdamW at the winning config) | 13 runs |
-| 3_method_lr | not run | 0 / 6 |
-| 4_step_decay | not run | 0 / 3 |
-| 5_budget_seeds | still n=1 per budget | 0 / 12 |
-| 6_headline_seeds | still n=3 | 0 / 4 |
+## A. Headline (CIFAR-10, 200 epochs)
 
-All result JSONs verified intact: every `val_history` length matches its epoch
-budget. The power loss stopped the run; it did not truncate data.
+| arm | n | peak | final | t@90 | t@93 | t@94 | t@95 |
+|---|---|---|---|---|---|---|---|
+| `B1_external_wd_eff` | 5 | 0.9522 | 0.9514 | 16 | 55 | 111 | 168 |
+| `C_cosine_only_lr0.4` | 5 | 0.9523 | 0.9514 | 69 | 132 | 148 | 163 |
+| `C_cosine_only_lr0.2` | 3 | 0.9512 | 0.9507 | 44 | 114 | 134 | 171 |
+| `C_cosine_only` | 3 | 0.9503 | 0.9493 | 105 | 151 | 162 | 189 |
+| `AdamW_cosine_lr0.001` | 3 | 0.9416 | 0.9405 | 20 | 103 | 172 | never |
+| `B1_external_wd_eff_noanneal` | 3 | 0.9398 | 0.9363 | 17 | 63 | 175 | never |
 
-## Battery 1: AdamW tuning — claim survives, halved
+* B1 − `C_cosine_only_lr0.4` final: **-0.00 pp**  t=-0.01  n=5  B1 higher in 3/5
+* B1 − `C_cosine_only_lr0.4` t90: **-53.00 ep**  t=-18.18  n=5  B1 faster in 5/5
+* B1 − `C_cosine_only_lr0.4` t94: **-37.40 ep**  t=-5.87  n=5  B1 faster in 5/5
+* B1 − `C_cosine_only_lr0.2` final: **+0.11 pp**  t=+1.05  n=3  B1 higher in 2/3
+* B1 − `C_cosine_only_lr0.2` t90: **-27.67 ep**  t=-8.43  n=3  B1 faster in 3/3
+* B1 − `C_cosine_only_lr0.2` t94: **-21.67 ep**  t=-4.04  n=3  B1 faster in 3/3
+* B1 − `C_cosine_only` final: **+0.26 pp**  t=+5.50  n=3  B1 higher in 3/3
+* B1 − `C_cosine_only` t90: **-88.67 ep**  t=-14.96  n=3  B1 faster in 3/3
+* B1 − `C_cosine_only` t94: **-50.33 ep**  t=-8.15  n=3  B1 faster in 3/3
+* B1 − `AdamW_cosine_lr0.001` final: **+1.13 pp**  t=+7.92  n=3  B1 higher in 3/3
+* B1 − `AdamW_cosine_lr0.001` t90: **-3.33 ep**  t=-1.89  n=3  B1 faster in 2/3
+* B1 − `AdamW_cosine_lr0.001` t94: **-63.00 ep**  t=-31.50  n=2  B1 faster in 2/2
+* B1 − `B1_external_wd_eff_noanneal` final: **+1.56 pp**  t=+13.79  n=3  B1 higher in 3/3
+* B1 − `B1_external_wd_eff_noanneal` t90: **+0.00 ep**  t=+0.00  n=3  B1 faster in 2/3
 
-| AdamW config | final | peak |
-|---|---|---|
-| lr 3e-4 wd 0.01 (earlier) | 0.9343 | 0.9353 |
-| lr 1e-3 wd 0.01 | 0.9395 | 0.9402 |
-| lr 1e-3 wd 0.05 | 0.9404 | 0.9411 |
-| lr 2e-3 wd 0.01 | 0.9407 | 0.9416 |
-| **lr 2e-3 wd 0.05 (best)** | **0.9456** | **0.9467** |
+## B. AdamW tuning — decides the +1.1 pp claim
 
-B1 final 0.9519 vs best AdamW 0.9456:
+| arm | n | peak | final | t@90 | t@93 | t@94 | t@95 |
+|---|---|---|---|---|---|---|---|
+| `AdamW_cosine_lr0.0003` | 3 | 0.9353 | 0.9343 | 27 | 145 | never | never |
+| `AdamW_cosine_lr0.001` | 3 | 0.9416 | 0.9405 | 20 | 103 | 172 | never |
+| `AdamW_cosine_lr0.001_wd0.01` | 3 | 0.9402 | 0.9395 | 22 | 96 | 171 | never |
+| `AdamW_cosine_lr0.001_wd0.05` | 3 | 0.9411 | 0.9404 | 22 | 112 | 177 | never |
+| `AdamW_cosine_lr0.002_wd0.01` | 3 | 0.9416 | 0.9407 | 22 | 100 | 169 | never |
+| `AdamW_cosine_lr0.002_wd0.05` | 3 | 0.9467 | 0.9456 | 23 | 120 | 159 | never |
+| `AdamW_dual_lr0.001` | 3 | 0.9379 | 0.9373 | 16 | 86 | never | never |
 
-* **+0.63 pp**, paired t = +6.37, B1 wins 3/3 seeds.
-* Against the previously reported untuned config it was +1.14 pp, so proper tuning
-  **halved the margin but did not remove it**.
+**Best AdamW: `AdamW_cosine_lr0.002_wd0.05` final 0.9456.**  Claim survives if this stays below B1's final (0.9514).
 
-Caveat: both lr and wd improve monotonically across the grid (1e-3 -> 2e-3,
-0.01 -> 0.05), so the optimum may lie beyond the grid. A reviewer can ask for
-lr 4e-3 / wd 0.1. Expected effect: at most another ~0.2-0.3 pp, which would leave
-the claim positive but thin.
+## C. CIFAR-100 — decides main-track viability
 
-## Battery 2: CIFAR-100 — the speed result replicates, the accuracy tie holds
+| arm | n | peak | final | t@90 | t@93 | t@94 | t@95 |
+|---|---|---|---|---|---|---|---|
+| `AdamW_cosine_lr0.001_wd0.01_c100` | 1 | 0.7294 | 0.7283 | never | never | never | never |
+| `AdamW_cosine_lr0.002_wd0.05_c100` | 3 | 0.7380 | 0.7373 | never | never | never | never |
+| `B1_external_wd_eff_c100` | 3 | 0.7777 | 0.7761 | never | never | never | never |
+| `C_cosine_only_lr0.2_c100` | 3 | 0.7710 | 0.7695 | never | never | never | never |
+| `C_cosine_only_lr0.4_c100` | 3 | 0.7799 | 0.7780 | never | never | never | never |
 
-CIFAR-100 tops out near 78%, so the paper's 90% threshold does not exist on this
-dataset. Thresholds are reported at 65 / 70 / 75%.
+* B1 − `AdamW_cosine_lr0.002_wd0.05_c100` final: **+3.88 pp**  t=+38.24  n=3  B1 higher in 3/3
+* B1 − `C_cosine_only_lr0.2_c100` final: **+0.66 pp**  t=+2.81  n=3  B1 higher in 3/3
+* B1 − `C_cosine_only_lr0.4_c100` final: **-0.20 pp**  t=-1.48  n=3  B1 higher in 0/3
 
-| arm | n | final | t@65 | t@70 | t@75 |
+## D. Budget-matched — peak gap vs budget
+
+| budget | arm | n | t@90 | final | peak |
 |---|---|---|---|---|---|
-| **B1 triangle x cosine** | 3 | 0.7761 | **12** | **21** | 131 |
-| C cosine, peak 0.4 (mean-matched) | 3 | 0.7780 | 68 | 112 | 130 |
-| C cosine, peak 0.2 | 3 | 0.7695 | 40 | 90 | 112 |
-| AdamW lr1e-3 wd0.01 (undertuned) | 1 | 0.7283 | 17 | 86 | never |
+| 40 | B1 triangle×cosine | 1 | 15 | 0.9324 | 0.9328 |
+| 40 | cosine anneal 0.2 | 1 | 21 | 0.9271 | 0.9271 |
+| 80 | B1 triangle×cosine | 1 | 15 | 0.9445 | 0.9449 |
+| 80 | cosine anneal 0.2 | 1 | 30 | 0.9369 | 0.9395 |
+| 160 | B1 triangle×cosine | 1 | 16 | 0.9496 | 0.9498 |
+| 160 | cosine anneal 0.2 | 1 | 45 | 0.9452 | 0.9455 |
 
-Paired B1 vs the mean-matched baseline:
+Note: budgets 40/80/160 use anneal horizon = budget for both arms. The 200 row is the full-budget run.
 
-| metric | B1 | C@0.4 | diff | t | |
-|---|---|---|---|---|---|
-| final | 0.7784/0.7752/0.7746 | 0.7784/0.7797/0.7760 | **-0.20 pp** | -1.48 | n.s. |
-| t@65 | 12/13/12 | 67/65/71 | -55.3 ep | **-27.3** | **5.5x** |
-| t@70 | 22/20/21 | 114/109/114 | -91.3 ep | **-76.0** | **5.3x** |
-| t@75 | 133/130/129 | 132/130/130 | 0.0 ep | 0.00 | 1.0x |
-
-1. **The speed advantage replicates and strengthens**: 5.5x at 65% and 5.3x at 70%,
-   all three seeds, against the same mean-matched control as CIFAR-10.
-2. **The accuracy tie also replicates**: -0.20 pp, t=-1.48, n.s. -- a statistical
-   tie, not a loss. The point estimate sits behind the cosine baseline, but see the
-   loss/accuracy divergence below: B1 is significantly better on cross-entropy.
-3. **The threshold dependence replicates**: by 75% the two arms are identical
-   (131 vs 130 epochs). The advantage lives in early-to-mid training on both
-   datasets, which makes it a property of the schedule rather than of one
-   benchmark.
-
-## What this does to the paper
-
-* The **4.1x / 5.5x speed claim** now rests on two datasets, both against a
-  mean-matched control, with identical threshold behaviour. This is the load
-  bearing result and it held up.
-* The **AdamW claim** survives at +0.63 pp but should be stated that way, not as
-  +1.14 pp.
-* The **final-accuracy claim** does not exist on either dataset. The abstract must
-  not imply one.
-
-## Still missing (before submission)
-
-1. **Momentum baseline** (7 h) — never run. The single most predictable reviewer
-   objection: every arm has momentum 0.
-2. **Method peak-lr sensitivity** (7 h) — the method has only run at 0.8.
-3. **CIFAR-100 AdamW at the best config** (3 runs, ~3.5 h) — the current CIFAR-100
-   AdamW point is undertuned and would be an easy target.
-4. Step decay (4 h), budget seeds (6 h), headline seeds (4 h) — stretch.
-
-
-## Loss and accuracy disagree: what it means
-
-Final-epoch metrics, B1 vs the mean-matched cosine baseline:
-
-| dataset | val_loss (B1 - C) | t | val_acc (B1 - C) | t |
-|---|---|---|---|---|
-| CIFAR-100 | **-0.0268 (lower)** | **-5.02** | -0.20 pp | -1.48 (n.s.) |
-| CIFAR-10 | +0.0057 | +0.98 (n.s.) | +0.14 pp | +0.90 (n.s.) |
-
-On CIFAR-100, B1 reaches **the same accuracy at significantly lower
-cross-entropy**. On CIFAR-10 both metrics are statistically tied. So the apparent
-contradiction ("lower loss but not higher accuracy") is not a contradiction:
-
-* **Accuracy** counts only the argmax; **cross-entropy** scores the probability
-  assigned to the true class. They measure different things.
-* Confidence can improve without the decision changing: a sample at p(true)=0.6
-  costs 0.51 nats; at 0.9 it costs 0.105, while the argmax is unchanged.
-* CE penalises confident errors very heavily, so a model can trade a few confident
-  errors for sharper correct predictions and end up with lower loss at equal
-  accuracy.
-
-Two controls rule out the obvious artefacts:
-
-* **Evaluation phase**: B1 is evaluated at the LR trough. Re-running with
-  `--phase-offset 195` (evaluated at the peak) moves loss by +0.0041 (t=+0.64) and
-  accuracy not at all. Not an artefact.
-* **Noise**: the loss effect is t=-5.02 across three seeds.
-
-A third illustration from the same runs: AdamW lr2e-3/wd0.05 reaches its minimum
-*test loss* at epoch 42 but its best accuracy at epoch 188 -- loss and accuracy peak
-nine-tenths of training apart under a strongly-decayed schedule.
-
-**Implication for the paper:** accuracy stays the primary metric, because every
-claim is about reaching thresholds. The CIFAR-100 loss result is a secondary,
-favourable observation ("equal accuracy at lower cross-entropy"). It should be
-reported with a caveat: without a calibration metric (ECE) we cannot separate
-"better calibrated" from "more confident on the samples it already gets right".
-
-
-## CIFAR-100, complete
-
-| arm | n | final | peak | t@65 | t@70 | t@75 |
-|---|---|---|---|---|---|---|
-| **B1 triangle x cosine** | 3 | 0.7761 | 0.7777 | **12** | **21** | 131 |
-| C cosine, peak 0.4 (mean-matched) | 3 | 0.7780 | 0.7799 | 68 | 112 | 131 |
-| C cosine, peak 0.2 | 3 | 0.7695 | 0.7710 | 40 | 90 | 112 |
-| **AdamW lr2e-3 wd0.05** (CIFAR-10-tuned) | 3 | **0.7373** | 0.7380 | 34 | 129 | never |
-| AdamW lr1e-3 wd0.01 | 1 | 0.7283 | 0.7294 | 17 | 86 | never |
-
-Against AdamW on CIFAR-100:
-
-* final accuracy **+3.88 pp**, t = +38.2, B1 wins 3/3
-* peak accuracy **+3.96 pp**, t = +24.9, B1 wins 3/3
-* t@65 2.7x faster, t@70 **6.1x faster**
-
-Against the mean-matched cosine on CIFAR-100 (unchanged): final accuracy tied
-(-0.20 pp, t = -1.48) with B1's cross-entropy significantly lower (-0.0268,
-t = -5.02), and 5.3-5.5x faster to 65/70%.
-
-### Caveat that must be stated
-
-The AdamW hyperparameters (lr 2e-3, wd 0.05) were **tuned on CIFAR-10 and applied
-unchanged to CIFAR-100**. That is exactly the asymmetric-tuning criticism this
-project has been trying to avoid. Two CIFAR-100 AdamW points now exist
-(0.7283 at lr1e-3/wd0.01, 0.7373 at lr2e-3/wd0.05), both well below B1's 0.7761,
-so the direction is consistent -- but a reviewer can reasonably ask for AdamW to be
-tuned on CIFAR-100 itself. If the true CIFAR-100 optimum is around 0.76, the
-+3.9 pp claim shrinks toward the CIFAR-10 figure (+0.63 pp) or disappears.
-
-Priority note: per-dataset AdamW tuning is a ~7 h grid and affects only the
-secondary AdamW claim. The momentum baseline is still unrun and affects the
-primary speed claim.

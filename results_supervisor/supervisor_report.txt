@@ -1,0 +1,18 @@
+==============================================================================
+A. VALIDATION/TEST SEPARATION (reviewer 3.4)
+==============================================================================
+(battery a not run yet)
+
+==============================================================================
+B. CYCLE-PERIOD SWEEP (reviewer 6.2)
+==============================================================================
+Traceback (most recent call last):
+  File "/workspace/schd/clr_equiv_experiment/scripts/supervisor_report.py", line 184, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/workspace/schd/clr_equiv_experiment/scripts/supervisor_report.py", line 123, in main
+    order = sorted(per, key=lambda a: float(a.split("_per")[1]))
+  File "/workspace/schd/clr_equiv_experiment/scripts/supervisor_report.py", line 123, in <lambda>
+    order = sorted(per, key=lambda a: float(a.split("_per")[1]))
+                                      ~~~~~^^^^^^^^^^^^^^^^^^^^
+ValueError: could not convert string to float: 'iod'
