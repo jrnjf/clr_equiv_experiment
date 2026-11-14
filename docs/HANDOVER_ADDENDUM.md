@@ -14,7 +14,7 @@ Read `docs/SUPERVISOR_RESULTS.md` for the numbers behind everything here.
 |---|---|---|
 | "short-period / one-epoch cycle" is the contribution | **REFUTED** — the period is not special; longer periods are better at 93-94% | rewrite the framing and title |
 | "decay must track the learning rate" (§5.8) | **REFUTED as stated** — LR-independent decay at matched strength reaches 94.1% | narrow the claim |
-| "4.1x / 6.5x faster" | **holds** — B1 now has 5 seeds, 16.2 ep to 90% | restate with new n |
+| "4.1x / 6.5x faster" | **holds** — B1 and the momentum baseline now have 5 seeds: 16.2 vs 105.8 ep to 90% (6.5x) | restate with new n |
 | "comparable peak accuracy to the standard recipe" | **holds** | keep |
 | "no accuracy advantage over tuned cosine" | **holds** | keep |
 | "tuned AdamW" | **too strong** | "best tested AdamW configuration" |
@@ -106,8 +106,8 @@ From `docs/review_response/P0_statistics.txt`:
 > triangular cycle (Smith's cyclical policy) multiplied by a cosine anneal — and we
 > make no novelty claim for the composition. On CIFAR-10 and CIFAR-100 with
 > ResNet-18, momentum-free SGD with this schedule reaches 90% test accuracy in 16.2
-> epochs against 107.7 for SGD with momentum 0.9 and cosine annealing, a 6.5x
-> reduction, at comparable peak accuracy (95.1% vs 95.4%). On CIFAR-100 it reaches
+> epochs against 105.8 for SGD with momentum 0.9 and cosine annealing, a 6.5x
+> reduction, at comparable peak accuracy (95.2% vs 95.5%). On CIFAR-100 it reaches
 > 65% in 12.3 epochs against 67.7, a 5.5x reduction. The effect does not require a
 > specific configuration: final accuracy is flat (95.1-95.2%) for cycle periods from
 > 0.25 to 8 epochs and peak learning rates from 0.4 to 1.2, and it survives

@@ -1,5 +1,10 @@
 # Handover to the research writer
 
+> **SUPERSEDED IN PART.** The supervisor review changed three of the claims below.
+> Read `docs/HANDOVER_ADDENDUM.md` first; this file remains useful for the project
+> history and for the pre-review numbers, but the period framing, the decay claim
+> and several statistics were revised.
+
 You are taking over the writing of an empirical paper about a learning-rate
 schedule. This document tells you what the paper is, how the evidence was built
 (including everything that failed), what you may and may not claim, and where the
@@ -175,7 +180,7 @@ Key paired statistics (n=3, |t| >= 4.30 for p<0.05):
 |---|---|---|---|---|
 | method vs mean-matched cosine | t@90 | -52.0 ep (4.1x) | -11.53 | 3/3 |
 | method vs mean-matched cosine | final acc | +0.14 pp | +0.90 (n.s.) | 2/3 |
-| method vs standard momentum recipe | t@90 | -91.0 ep (6.5x) | -78.81 | 3/3 |
+| method vs standard momentum recipe | t@90 | -89.6 ep (6.5x) | -78.8 (n=3) | 3/3 |
 | method vs standard momentum recipe | final acc | -0.17 pp | -1.53 (n.s.) | 1/3 |
 | method vs standard momentum recipe | peak acc | -0.16 pp | -2.62 | 0/3 |
 | method vs method+momentum | final acc | +2.82 pp | +30.78 | 3/3 |
