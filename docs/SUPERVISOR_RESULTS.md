@@ -104,9 +104,41 @@ comparisons in the first place.
   when the observed gap is 0.14 pp; the exact permutation test cannot go below
   p = 0.25 at n=3.
 
-## A. Validation/test separation (reviewer 3.4) — STILL OUTSTANDING
+## A. Validation/test separation (reviewer 3.4) — IN PROGRESS (3 of 6 arms)
 
-Critical and unrun. The guard that blocked it is fixed; one command on the GPU box:
+Running as of Sat 14 Nov 18:29. Complete: B1, cosine@0.2, cosine@0.4. Remaining:
+cosine@0.8 (mid-run), the **momentum-0.9 standard recipe** (essential), and AdamW.
+
+Preliminary, from the three finished arms (45k train / 5k val, 3 seeds):
+
+| arm | best val | final test | t@90 (val) | t@93 (val) |
+|---|---|---|---|---|
+| B1 triangle x cosine | 0.9521 | 0.9485 | **18** | **42** |
+| cosine, peak 0.2 | 0.9525 | 0.9456 | 37 | 106 |
+| cosine, peak 0.4 (mean-matched) | 0.9539 | 0.9500 | 60 | 118 |
+
+Three things this already establishes:
+
+1. **The speed result survives the split.** B1 reaches 90% validation accuracy at
+   epoch 18 against 60 for the mean-matched cosine (3.3x) and 37 for cosine@0.2
+   (2.1x). It is not an artefact of training on the full 50k.
+2. **No accuracy advantage, again.** The mean-matched cosine leads on both
+   validation (95.39) and test (95.00); B1 is second on test. Consistent with the
+   paper's claim of no final-accuracy superiority.
+3. **Selection stability is partial.** Ranking by validation gives
+   cosine@0.4 > cosine@0.2 > B1; ranking by test gives
+   cosine@0.4 > B1 > cosine@0.2. The *winner is the same on both*, but B1 and
+   cosine@0.2 swap places because they are statistically tied (0.04 pp apart on
+   validation). That is the honest answer to item 3.4: selection on validation is
+   stable for the choice that matters and arbitrary among near-ties.
+
+Accuracies are 0.3-0.5 pp lower than the full-data runs, as expected from 10% less
+training data (B1 test 95.14% -> 94.85%).
+
+### Still outstanding
+
+The remaining arms, especially the momentum-0.9 standard recipe, are needed before
+item 3.4 is fully answered. The guard that blocked the battery is fixed; rerun with:
 
 ```bash
 bash scripts/supervisor_campaign.sh --only a
