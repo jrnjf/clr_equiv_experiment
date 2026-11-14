@@ -2,25 +2,25 @@
 PAIRED COMPARISONS (per-seed differences, 95% CI, exact permutation p)
 ============================================================================================
 
-vs mean-matched cosine  (final, n=3)
-  per seed : [0.02, -0.05, 0.46]
-  mean     : +0.143 pp   95% CI [-0.543, +0.830]
-  t=+0.90  p(t)=0.4640  exact permutation p=0.750
+vs mean-matched cosine  (final, n=5)
+  per seed : [0.02, -0.05, 0.46, -0.51, 0.07]
+  mean     : -0.002 pp   95% CI [-0.432, +0.428]
+  t=-0.01  p(t)=0.9903  exact permutation p=1.000
 
-vs mean-matched cosine  (epoch@90%, n=3)
-  per seed : [-47, -61, -48]
-  mean     : -52.000 ep   95% CI [-71.402, -32.598]
-  t=-11.53  p(t)=0.0074  exact permutation p=0.250
+vs mean-matched cosine  (epoch@90%, n=5)
+  per seed : [-47, -61, -48, -59, -50]
+  mean     : -53.000 ep   95% CI [-61.095, -44.905]
+  t=-18.18  p(t)=0.0001  exact permutation p=0.062
 
-vs standard momentum  (final, n=3)
-  per seed : [0.04, -0.21, -0.33]
-  mean     : -0.167 pp   95% CI [-0.636, +0.302]
-  t=-1.53  p(t)=0.2658  exact permutation p=0.500
+vs standard momentum  (final, n=5)
+  per seed : [0.04, -0.21, -0.33, -0.43, -0.45]
+  mean     : -0.276 pp   95% CI [-0.525, -0.027]
+  t=-3.08  p(t)=0.0371  exact permutation p=0.125
 
-vs standard momentum  (epoch@90%, n=3)
-  per seed : [-91, -93, -89]
-  mean     : -91.000 ep   95% CI [-95.968, -86.032]
-  t=-78.81  p(t)=0.0002  exact permutation p=0.250
+vs standard momentum  (epoch@90%, n=5)
+  per seed : [-91, -93, -89, -84, -91]
+  mean     : -89.600 ep   95% CI [-93.865, -85.335]
+  t=-58.32  p(t)=0.0000  exact permutation p=0.062
 
 vs best tested AdamW  (final, n=3)
   per seed : [0.79, 0.45, 0.64]
@@ -41,7 +41,7 @@ The review says 80% power at n=3 needs d/sigma ~ 3.26, not 2.84.
   n=8: d/sigma needed for 80% power = 1.16
 
 Detectable final-accuracy difference, using the observed paired SD:
-  vs mean-matched cosine   paired SD = 0.28 pp -> detectable at 80% power = 0.90 pp (observed 0.14 pp)
+  vs mean-matched cosine   paired SD = 0.35 pp -> detectable at 80% power = 0.59 pp (observed 0.00 pp)
   vs best tested AdamW     paired SD = 0.17 pp -> detectable at 80% power = 0.56 pp (observed 0.63 pp)
 
 With n=3 the exact permutation test cannot go below p=0.25 no matter
@@ -52,9 +52,9 @@ and describe agreement across seeds rather than leaning on t p-values.
 WALL-CLOCK TIME TO THRESHOLD (reviewer 6.4)
 ============================================================================================
 arm                                 t@90 (ep)  wall@90 (s)  wall@93 (s)
-B1_external_wd_eff                         17          339         1067
-C_cosine_only_lr0.4                        69         1357         2606
-C_cosine_only_lr0.1_mom0.9                108         2806         3917
+B1_external_wd_eff                         16          328         1087
+C_cosine_only_lr0.4                        69         1351         2580
+C_cosine_only_lr0.1_mom0.9                106         2482         3506
 AdamW_cosine_lr0.002_wd0.05                23          983         5139
 
 Note: wall-clock includes per-epoch validation of 10k images, which is
