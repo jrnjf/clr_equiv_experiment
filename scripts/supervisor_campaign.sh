@@ -55,9 +55,6 @@ for b in "${BATTERIES[@]}"; do
   if [ -n "$ONLY" ] && [[ " $ONLY " != *" $idx "* ]]; then
     echo "--- skip $id (not in --only)"; continue
   fi
-  if [ -z "$ONLY" ] && [ "$idx" != "a" ] && [ "$idx" \< "$(printf '%s' "$FROM" | tr '0-9' 'a-j' | cut -c1)" ] 2>/dev/null; then
-    : # --from handled below by numeric order
-  fi
   # numeric --from check against battery order a=1..f=6
   order=$(printf '%s' "$idx" | tr 'abcdef' '123456')
   if [ -z "$ONLY" ] && [ "$order" -lt "$FROM" ]; then

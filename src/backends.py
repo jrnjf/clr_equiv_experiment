@@ -68,13 +68,8 @@ def _build_tiny(cfg):
         train_full = Subset(train_full, tr_idx)
 
     steps = len(train_full) // bs
-    if steps % 2:
-        raise SystemExit(
-            f"tiny backend: {len(train_full)} samples / batch {bs} = {steps} steps, "
-            f"which is ODD. The triangular half-cycle would be {steps/2}. "
-            f"Pick a batch size that divides to an even count "
-            f"(e.g. batch_size={len(train_full)//(steps-1) if steps>2 else bs})."
-        )
+    # No even-step requirement: the schedule is a LambdaLR and works at any step
+    # count (see the note in _build_cifar_like).
 
     loader_kw = dict(num_workers=0, pin_memory=False)
     train_loader = DataLoader(train_full, batch_size=bs, shuffle=True,
@@ -197,14 +192,12 @@ def _build_cifar_like(cfg, dataset="CIFAR10", num_classes=10):
     else:
         val_loader = eval_loader
 
-    steps = len(train_loader)          # e.g. 50000/250 = 200
-    if steps % 2:
-        raise SystemExit(
-            f"cifar: len(train_loader) = {steps} is ODD, so the triangular "
-            f"half-cycle is {steps/2} and no CyclicLR configuration reproduces "
-            f"the internal wave exactly. With 50000 train images, use a batch "
-            f"size giving an even step count (250 -> 200, 200 -> 250, 100 -> 500)."
-        )
+    # NOTE: no even-step requirement. The schedule is a plain LambdaLR, which
+    # reproduces the analytic triangle x cosine series at any steps_per_epoch
+    # (assert_lambdalr_alignment checks this). The old guard existed only because
+    # the E1 equivalence check compared against CyclicLR; that path is gone, and the
+    # guard blocked the 45k/5k validation-split runs (351 steps, odd).
+    steps = len(train_loader)
 
     def make_model():
         m = resnet18(num_classes=num_classes)
@@ -301,10 +294,8 @@ def _build_cifar_bench(cfg):
                             num_workers=nw, pin_memory=True,
                             persistent_workers=pw)
 
+    # No even-step requirement (the CyclicLR equivalence check is gone).
     steps = len(train_loader)
-    if steps % 2:
-        raise SystemExit(f"cifar_bench: len(train_loader)={steps} is ODD; the "
-                         f"triangular half-cycle {steps/2} cannot be reproduced.")
 
     def make_model():
         m = resnet18(num_classes=10)

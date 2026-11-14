@@ -15,6 +15,7 @@ Sections map to the review items:
 import argparse
 import glob
 import json
+import re
 import os
 import statistics as st
 import sys
@@ -120,7 +121,8 @@ def main():
     print("=" * 78)
     per = [a for a in R if a.startswith("P_period")]
     if per:
-        order = sorted(per, key=lambda a: float(a.split("_per")[1]))
+        order = sorted(per, key=lambda a: float(
+            re.search(r"_per([0-9.]+)$", a).group(1)))
         table(R, order, ("final",) + THRS,
               ("final", "t@90", "t@93", "t@94"), "period sweep")
         print(f"\nreference: 1-epoch cycle = B1_external_wd_eff "
@@ -134,7 +136,8 @@ def main():
     print("=" * 78)
     pk = [a for a in R if a.startswith("B1_external_wd_eff_lr")]
     if pk:
-        order = sorted(pk, key=lambda a: float(a.split("_lr")[1]))
+        order = sorted(pk, key=lambda a: float(
+            re.search(r"_lr([0-9.]+)$", a).group(1)))
         table(R, order, ("final",) + THRS,
               ("final", "t@90", "t@93", "t@94"), "peak-LR sweep")
         print(f"\nreference: peak 0.8 = B1_external_wd_eff "
