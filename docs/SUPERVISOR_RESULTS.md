@@ -104,41 +104,54 @@ comparisons in the first place.
   when the observed gap is 0.14 pp; the exact permutation test cannot go below
   p = 0.25 at n=3.
 
-## A. Validation/test separation (reviewer 3.4) — IN PROGRESS (3 of 6 arms)
+## A. Validation/test separation (reviewer 3.4) — 15 of 18 runs
 
-Running as of Sat 14 Nov 18:29. Complete: B1, cosine@0.2, cosine@0.4. Remaining:
-cosine@0.8 (mid-run), the **momentum-0.9 standard recipe** (essential), and AdamW.
+Complete: B1, cosine@{0.2,0.4,0.8}, momentum-0.9 recipe. Missing: `AdamW` on the
+split (seed 0 was killed at epoch 54 by SIGHUP; seeds 1-2 never ran).
 
-Preliminary, from the three finished arms (45k train / 5k val, 3 seeds):
+45k train / 5k validation, 3 seeds. `val` = best validation accuracy, `test` =
+final accuracy on the untouched 10k test split.
 
 | arm | best val | final test | t@90 (val) | t@93 (val) |
 |---|---|---|---|---|
-| B1 triangle x cosine | 0.9521 | 0.9485 | **18** | **42** |
-| cosine, peak 0.2 | 0.9525 | 0.9456 | 37 | 106 |
-| cosine, peak 0.4 (mean-matched) | 0.9539 | 0.9500 | 60 | 118 |
+| **B1 triangle x cosine** | 0.9521 | 0.9485 | **17.7** | **41.7** |
+| **cosine + momentum 0.9, lr 0.1 (standard)** | 0.9542 | 0.9498 | 96.3 | 149.3 |
+| cosine, peak 0.8 | 0.9557 | 0.9516 | 93.3 | 138.3 |
+| cosine, peak 0.4 (mean-matched) | 0.9539 | 0.9500 | 60.0 | 118.3 |
+| cosine, peak 0.2 | 0.9525 | 0.9456 | 36.7 | 106.3 |
 
-Three things this already establishes:
+### The headline speed claim survives, but the number changes
 
-1. **The speed result survives the split.** B1 reaches 90% validation accuracy at
-   epoch 18 against 60 for the mean-matched cosine (3.3x) and 37 for cosine@0.2
-   (2.1x). It is not an artefact of training on the full 50k.
-2. **No accuracy advantage, again.** The mean-matched cosine leads on both
-   validation (95.39) and test (95.00); B1 is second on test. Consistent with the
-   paper's claim of no final-accuracy superiority.
-3. **Selection stability is partial.** Ranking by validation gives
-   cosine@0.4 > cosine@0.2 > B1; ranking by test gives
-   cosine@0.4 > B1 > cosine@0.2. The *winner is the same on both*, but B1 and
-   cosine@0.2 swap places because they are statistically tied (0.04 pp apart on
-   validation). That is the honest answer to item 3.4: selection on validation is
-   stable for the choice that matters and arbitrary among near-ties.
+Against the standard momentum recipe: **t@90 17.7 vs 96.3 epochs = 5.45x**
+(3/3 seeds, [18,18,17] vs [97,95,97]).
 
-Accuracies are 0.3-0.5 pp lower than the full-data runs, as expected from 10% less
-training data (B1 test 95.14% -> 94.85%).
+This must replace the 6.5x quoted in the submitted paper for this comparison, because
+the split moves both arms in opposite directions: B1 slows from 16.2 to 17.7 epochs,
+the momentum recipe accelerates from 105.8 to 96.3. The reduction is smaller but still
+large and consistent.
+
+Final test accuracy: B1 94.85% vs momentum 94.98% (a tie), matching the full-data
+conclusion of no accuracy advantage.
+
+### Selection stability: the answer to 3.4
+
+| ranked by | order |
+|---|---|
+| validation | cosine@0.8 > momentum > cosine@0.4 > cosine@0.2 > B1 |
+| test | cosine@0.8 > cosine@0.4 > momentum > B1 > cosine@0.2 |
+
+The **winner is identical under both criteria** (cosine@0.8), which is the choice that
+matters for selecting the cosine baseline. B1 ranks low on accuracy under both.
+Intermediate orderings shift among arms separated by less than 0.15 pp, i.e. among
+statistical ties. The honest claim: validation-based selection is stable for the
+baseline that matters and arbitrary among near-ties.
+
+Accuracies are 0.3-0.5 pp below the full-data runs, expected from 10% less training
+data.
 
 ### Still outstanding
 
-The remaining arms, especially the momentum-0.9 standard recipe, are needed before
-item 3.4 is fully answered. The guard that blocked the battery is fixed; rerun with:
+Only the AdamW arm on the split remains (3 runs, ~2.7 h). Resume with:
 
 ```bash
 bash scripts/supervisor_campaign.sh --only a
