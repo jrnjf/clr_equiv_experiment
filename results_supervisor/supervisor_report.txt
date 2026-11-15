@@ -1,18 +1,82 @@
 ==============================================================================
 A. VALIDATION/TEST SEPARATION (reviewer 3.4)
 ==============================================================================
-(battery a not run yet)
+val = best validation accuracy during training;
+test = final accuracy on the untouched 10k test split.
+
+arm                                       n      val     test     gap
+---------------------------------------------------------------------
+AdamW_cosine_lr0.002_wd0.05_val           3   0.9493   0.9423  -0.69pp
+B1_external_wd_eff_val                    3   0.9521   0.9485  -0.35pp
+C_cosine_only_lr0.1_mom0.9_val            3   0.9542   0.9498  -0.44pp
+C_cosine_only_lr0.2_val                   3   0.9525   0.9456  -0.68pp
+C_cosine_only_lr0.4_val                   3   0.9539   0.9500  -0.39pp
+C_cosine_only_lr0.8_val                   3   0.9557   0.9516  -0.40pp
+
+The question the review asks is whether hyperparameter SELECTION on
+validation picks the same configuration as selection on test would.
 
 ==============================================================================
 B. CYCLE-PERIOD SWEEP (reviewer 6.2)
 ==============================================================================
-Traceback (most recent call last):
-  File "/workspace/schd/clr_equiv_experiment/scripts/supervisor_report.py", line 184, in <module>
-    sys.exit(main())
-             ~~~~^^
-  File "/workspace/schd/clr_equiv_experiment/scripts/supervisor_report.py", line 123, in main
-    order = sorted(per, key=lambda a: float(a.split("_per")[1]))
-  File "/workspace/schd/clr_equiv_experiment/scripts/supervisor_report.py", line 123, in <lambda>
-    order = sorted(per, key=lambda a: float(a.split("_per")[1]))
-                                      ~~~~~^^^^^^^^^^^^^^^^^^^^
-ValueError: could not convert string to float: 'iod'
+
+### period sweep
+arm                                       n    final     t@90     t@93     t@94
+-------------------------------------------------------------------------------
+P_period_per0.25                          3   0.9521       23       93      147
+P_period_per0.5                           3   0.9510       19       69      134
+P_period_per2                             3   0.9515       15       41       88
+P_period_per4                             3   0.9522       15       40       72
+P_period_per8                             3   0.9514       16       32       67
+
+reference: 1-epoch cycle = B1_external_wd_eff ({'n': 5, 'final': 0.95138, 0.9: 16.2, 0.93: 55, 0.94: 110.6, 'peak': 0.95218})
+
+==============================================================================
+C. PEAK LEARNING-RATE SENSITIVITY (reviewer 6.3)
+==============================================================================
+
+### peak-LR sweep
+arm                                       n    final     t@90     t@93     t@94
+-------------------------------------------------------------------------------
+B1_external_wd_eff_lr0.4                  3   0.9503       19       54      124
+B1_external_wd_eff_lr0.6                  3   0.9489       17       51      114
+B1_external_wd_eff_lr1                    3   0.9524       17       61      123
+B1_external_wd_eff_lr1.2                  3   0.9523       18       65      120
+
+reference: peak 0.8 = B1_external_wd_eff ({'n': 5, 'final': 0.95138, 0.9: 16.2, 0.93: 55, 0.94: 110.6, 'peak': 0.95218})
+
+==============================================================================
+D. DECAY STRENGTH vs DECAY PROFILE (reviewer 4)
+==============================================================================
+
+### LR-independent decay
+arm                                       n    final     t@90     t@93     t@94
+-------------------------------------------------------------------------------
+S_shrink_sh0.0001                         3   0.9412       17       52      141
+S_shrink_sh0.0005                         3   0.1045       21      169    never
+
+conditions:
+  A  LR-coupled, oscillating   = B1_external_wd_eff
+  B  LR-coupled, smooth        = C_cosine_only_lr0.4
+  C  LR-independent 1e-4       = S_shrink_sh0.0001  (strength matched)
+  D  LR-independent 5e-4       = S_shrink_sh0.0005  (original strong)
+
+If C matches A in final accuracy, LR-independent decay is fine at
+matched strength and the collapse is a STRENGTH effect. If C collapses
+like D, the profile -- not the strength -- is what destroys training.
+
+==============================================================================
+E. CYCLE-PHASE RANDOMISATION (reviewer 6.1)
+==============================================================================
+
+### phase lock vs randomised
+arm                                       n    final     t@90     t@93     t@94
+-------------------------------------------------------------------------------
+B1_external_wd_eff                        5   0.9514       16       55      111
+B1_external_wd_eff_c100                   3   0.7761    never    never    never
+B1_external_wd_eff_val                    3   0.9519       18       42       89
+R_phase_phrandom_init                     3   0.9520       17       52      119
+R_phase_phrandom_per_epoch                3   0.9514       19       66      119
+
+If randomised phase matches the locked phase, the effect is not an
+artefact of the cycle being synchronised with data shuffling.

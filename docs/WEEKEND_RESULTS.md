@@ -1,6 +1,6 @@
 # Weekend results  
 
-136 runs loaded from results*/ (newest file wins on duplicate arm+seed).
+154 runs loaded from results*/ (newest file wins on duplicate arm+seed).
 
 ## A. Headline (CIFAR-10, 200 epochs)
 
@@ -38,9 +38,10 @@
 | `AdamW_cosine_lr0.001_wd0.05` | 3 | 0.9411 | 0.9404 | 22 | 112 | 177 | never |
 | `AdamW_cosine_lr0.002_wd0.01` | 3 | 0.9416 | 0.9407 | 22 | 100 | 169 | never |
 | `AdamW_cosine_lr0.002_wd0.05` | 3 | 0.9467 | 0.9456 | 23 | 120 | 159 | never |
+| `AdamW_cosine_lr0.002_wd0.05_val` | 3 | 0.9493 | 0.9483 | 24 | 114 | 153 | 185 |
 | `AdamW_dual_lr0.001` | 3 | 0.9379 | 0.9373 | 16 | 86 | never | never |
 
-**Best AdamW: `AdamW_cosine_lr0.002_wd0.05` final 0.9456.**  Claim survives if this stays below B1's final (0.9514).
+**Best AdamW: `AdamW_cosine_lr0.002_wd0.05_val` final 0.9483.**  Claim survives if this stays below B1's final (0.9514).
 
 ## C. CIFAR-100 — decides main-track viability
 
